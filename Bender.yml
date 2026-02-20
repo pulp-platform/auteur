@@ -1,0 +1,18 @@
+# Copyright 2026 ETH Zurich and University of Bologna.
+# Solderpad Hardware License, Version 0.51, see LICENSE for details.
+# SPDX-License-Identifier: SHL-0.51
+
+package:
+  name: auteur
+
+dependencies:
+  common_cells: { git: "https://github.com/pulp-platform/common_cells.git", version: "1.39.0" }
+
+export_include_dirs:
+  - hw/include
+
+sources:
+  files:
+    - hw/auteur_pkg.sv
+    - hw/auteur_dotp.sv
+    - hw/auteur_fifo.sv

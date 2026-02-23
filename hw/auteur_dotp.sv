@@ -25,15 +25,19 @@ module auteur_dotp
   parameter int unsigned    OutSuperFmtExpBits = 1,
   parameter int unsigned    MxScaleSuperFmtManBits = 1,
   parameter int unsigned    MxScaleSuperFmtExpBits = 1,
+  // Indicates that the input mantissae include the explicit leading 1 (i.e., they are unnormalized).
+  // This is useful when combining two narrow formats whose combined explicit mantissa bits are insufficient to fill the mantissa of a wider target format.
+  // As an example, expanding two E2M1 inputs into one E4M3 format requires these explicit leading 1s to fill the target mantissa.
+  parameter bit             InManUnnorm = 0,
   parameter int unsigned    AccRoundBits = 1,
   parameter int unsigned    YDelay = 0,
   parameter int unsigned    ScalesDelay = 0,
   parameter dotp_pipe_cfg_t PipeCfg = '{default: '0},
 
   localparam type in_super_fmt_t = struct packed {
-    logic                         sign;
-    logic [InSuperFmtExpBits-1:0] exponent;
-    logic [InSuperFmtManBits-1:0] mantissa;
+    logic                                     sign;
+    logic [InSuperFmtExpBits-1:0]             exponent;
+    logic [InSuperFmtManBits+InManUnnorm-1:0] mantissa;
   },
   localparam type out_super_fmt_t = struct packed {
     logic                          sign;
@@ -78,14 +82,14 @@ module auteur_dotp
   localparam int unsigned OutSuperFmtBias = (1<<(OutSuperFmtExpBits-1)) - 1;
 
 
-  logic [NrIn-1:0]                        x_sign_d, x_sign_q,
-                                          w_sign_d, w_sign_q;
+  logic [NrIn-1:0]                                    x_sign_d, x_sign_q,
+                                                      w_sign_d, w_sign_q;
 
-  logic [NrIn-1:0][InSuperFmtExpBits-1:0] x_exp_d, x_exp_q,
-                                          w_exp_d, w_exp_q;
+  logic [NrIn-1:0][InSuperFmtExpBits-1:0]             x_exp_d, x_exp_q,
+                                                      w_exp_d, w_exp_q;
 
-  logic [NrIn-1:0][InSuperFmtManBits-1:0] x_mant_d, x_mant_q,
-                                          w_mant_d, w_mant_q;
+  logic [NrIn-1:0][InSuperFmtManBits+InManUnnorm-1:0] x_mant_d, x_mant_q,
+                                                      w_mant_d, w_mant_q;
 
   logic in_valid_mant_d, in_valid_mant_q,
         in_valid_exp_d, in_valid_exp_q;
@@ -103,13 +107,13 @@ module auteur_dotp
   assign in_valid_mant_d = in_valid_i;
   assign in_valid_exp_d  = in_valid_i;
 
-  `AUTEUR_PIPE(x_sign_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0]                       , x_sign_d, x_sign_q, in_valid_mant_d)
-  `AUTEUR_PIPE(x_exp_pipe , PipeCfg.input_path.exponent_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0], x_exp_d , x_exp_q , in_valid_exp_d )
-  `AUTEUR_PIPE(x_mant_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtManBits-1:0], x_mant_d, x_mant_q, in_valid_mant_d)
+  `AUTEUR_PIPE(x_sign_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0]                                   , x_sign_d, x_sign_q, in_valid_mant_d)
+  `AUTEUR_PIPE(x_exp_pipe , PipeCfg.input_path.exponent_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0]            , x_exp_d , x_exp_q , in_valid_exp_d )
+  `AUTEUR_PIPE(x_mant_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtManBits+InManUnnorm-1:0], x_mant_d, x_mant_q, in_valid_mant_d)
 
-  `AUTEUR_PIPE(w_sign_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0]                       , w_sign_d, w_sign_q, in_valid_mant_d)
-  `AUTEUR_PIPE(w_exp_pipe , PipeCfg.input_path.exponent_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0], w_exp_d , w_exp_q , in_valid_exp_d )
-  `AUTEUR_PIPE(w_mant_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtManBits-1:0], w_mant_d, w_mant_q, in_valid_mant_d)
+  `AUTEUR_PIPE(w_sign_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0]                                   , w_sign_d, w_sign_q, in_valid_mant_d)
+  `AUTEUR_PIPE(w_exp_pipe , PipeCfg.input_path.exponent_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0]            , w_exp_d , w_exp_q , in_valid_exp_d )
+  `AUTEUR_PIPE(w_mant_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtManBits+InManUnnorm-1:0], w_mant_d, w_mant_q, in_valid_mant_d)
 
   `AUTEUR_PIPE_VALID(in_valid_mant_pipe, PipeCfg.input_path.mantissa_path.inputs, in_valid_mant_d, in_valid_mant_q)
   `AUTEUR_PIPE_VALID(in_valid_exp_pipe , PipeCfg.input_path.exponent_path.inputs, in_valid_exp_d , in_valid_exp_q )
@@ -124,9 +128,18 @@ module auteur_dotp
   logic [NrMaxJoins:0][NrIn-1:0] prod_sign;
 
   for (genvar i = 0; i < NrIn; i++) begin : gen_initial_products
-    logic lead;
-    assign lead = (i+1)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
-    assign {prod_mant_carry[0][i],prod_mant_no_carry[0][i]} = {lead,x_mant_q[i]}*{lead,w_mant_q[i]};
+    logic x_lead, w_lead;
+
+    // If the input mantissa is normalized, we statically set the leading bit
+    if (InManUnnorm == 0) begin
+      assign x_lead = (i+1)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
+      assign w_lead = (i+1)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
+    end else begin
+      assign x_lead = x_mant_q[i][InSuperFmtManBits];
+      assign w_lead = w_mant_q[i][InSuperFmtManBits];
+    end
+
+    assign {prod_mant_carry[0][i],prod_mant_no_carry[0][i]} = {x_lead,x_mant_q[i][InSuperFmtManBits-1:0]}*{w_lead,w_mant_q[i][InSuperFmtManBits-1:0]};
     assign {prod_exp_carry[0][i],prod_exp_no_carry[0][i]} = x_exp_q[i] + w_exp_q[i];
     assign prod_sign[0][i] = x_sign_q[i] ^ w_sign_q[i];
   end
@@ -135,35 +148,63 @@ module auteur_dotp
     localparam int unsigned JoinWidth = 1<<s;
 
     for (genvar c = 0; c < NrIn/JoinWidth; c+=2) begin : gen_per_element_join
-      logic [InSuperFmtManBits*JoinWidth:0]          x_cat_l, x_cat_h, w_cat_l, w_cat_h;
-      logic [2*InSuperFmtManBits*JoinWidth:0]        prod_mant_lh, prod_mant_hl;
-      logic                                          mant_carry;
-      logic                                          exp_carry;
+      localparam int unsigned InCatWidth  = InManUnnorm == 0 ? InSuperFmtManBits*JoinWidth + 1 : (InSuperFmtManBits+InManUnnorm)*JoinWidth;
+      localparam int unsigned InProdWidth = InManUnnorm == 0 ? 2*InCatWidth - 1 : 2*InCatWidth;
+
+      logic [InCatWidth-1:0]  x_cat_l, x_cat_h, w_cat_l, w_cat_h;
+      logic [InProdWidth-1:0] prod_mant_lh, prod_mant_hl;
+      logic                   mant_carry;
+      logic                   exp_carry;
 
       always_comb begin : concat_mantissae
-        for (int unsigned i = 0; i < JoinWidth; i++) begin
-          x_cat_l[i*InSuperFmtManBits+:InSuperFmtManBits] = x_mant_q[c*JoinWidth+i];
-          w_cat_l[i*InSuperFmtManBits+:InSuperFmtManBits] = w_mant_q[c*JoinWidth+i];
-          x_cat_h[i*InSuperFmtManBits+:InSuperFmtManBits] = x_mant_q[(c+1)*JoinWidth+i];
-          w_cat_h[i*InSuperFmtManBits+:InSuperFmtManBits] = w_mant_q[(c+1)*JoinWidth+i];
-        end
+        if (InManUnnorm == 0) begin
+          for (int unsigned i = 0; i < JoinWidth; i++) begin
+            x_cat_l[i*InSuperFmtManBits+:InSuperFmtManBits] = x_mant_q[c*JoinWidth+i];
+            w_cat_l[i*InSuperFmtManBits+:InSuperFmtManBits] = w_mant_q[c*JoinWidth+i];
+            x_cat_h[i*InSuperFmtManBits+:InSuperFmtManBits] = x_mant_q[(c+1)*JoinWidth+i];
+            w_cat_h[i*InSuperFmtManBits+:InSuperFmtManBits] = w_mant_q[(c+1)*JoinWidth+i];
+          end
 
-        x_cat_l[InSuperFmtManBits*(s+1)] = 1'b0;
-        w_cat_l[InSuperFmtManBits*(s+1)] = 1'b0;
-        x_cat_h[InSuperFmtManBits*(s+1)] = ((c+2)*JoinWidth)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
-        w_cat_h[InSuperFmtManBits*(s+1)] = ((c+2)*JoinWidth)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
+          x_cat_l[InSuperFmtManBits*JoinWidth] = 1'b0;
+          w_cat_l[InSuperFmtManBits*JoinWidth] = 1'b0;
+          x_cat_h[InSuperFmtManBits*JoinWidth] = ((c+2)*JoinWidth)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
+          w_cat_h[InSuperFmtManBits*JoinWidth] = ((c+2)*JoinWidth)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
+        end else begin
+          x_cat_l = x_mant_q[c*JoinWidth];
+          w_cat_l = w_mant_q[c*JoinWidth];
+          x_cat_h = x_mant_q[(c+1)*JoinWidth];
+          w_cat_h = w_mant_q[(c+1)*JoinWidth];
+        end
       end
 
       for (genvar i = c*JoinWidth; i < (c+2)*JoinWidth-1; i++) begin : assign_unchanged_carries
-        assign prod_mant_carry[s+1][i] = prod_mant_carry[s][i];
+        if (InManUnnorm == 0) begin
+          assign prod_mant_carry[s+1][i] = prod_mant_carry[s][i];
+        end
+
         assign prod_exp_carry[s+1][i]  = i == (c+1)*JoinWidth-1 ? (cfg_i.num_joins <= s ? prod_exp_carry[s][i] : 1'b0) : prod_exp_carry[s][i];
       end
 
       assign prod_mant_lh = cfg_i.num_joins > s ? x_cat_l*w_cat_h : '0;
       assign prod_mant_hl = cfg_i.num_joins > s ? x_cat_h*w_cat_l : '0;
 
-      assign {mant_carry,prod_mant_no_carry[s+1][(c+2)*JoinWidth-1:c*JoinWidth]} = prod_mant_no_carry[s][(c+2)*JoinWidth-1:c*JoinWidth] + {prod_mant_lh,{(InSuperFmtManBits*JoinWidth){1'b0}}} + {prod_mant_hl,{(InSuperFmtManBits*JoinWidth){1'b0}}};
-      assign prod_mant_carry[s+1][(c+2)*JoinWidth-1]                             = prod_mant_carry[s][(c+2)*JoinWidth-1] + mant_carry;
+      if (InManUnnorm == 0) begin : gen_norm_products
+        assign {mant_carry,prod_mant_no_carry[s+1][(c+2)*JoinWidth-1:c*JoinWidth]} = prod_mant_no_carry[s][(c+2)*JoinWidth-1:c*JoinWidth] + {prod_mant_lh,{(InSuperFmtManBits*JoinWidth){1'b0}}} + {prod_mant_hl,{(InSuperFmtManBits*JoinWidth){1'b0}}};
+        assign prod_mant_carry[s+1][(c+2)*JoinWidth-1]                             = prod_mant_carry[s][(c+2)*JoinWidth-1] + mant_carry;
+      end else begin : gen_denorm_products
+        logic [2*JoinWidth-1:0][2*InSuperFmtManBits+1:0] prod_mant_packed;
+        logic [2*JoinWidth-1:0][2*InSuperFmtManBits+1:0] res_packed;
+
+        for (genvar e = 0; e < 2*JoinWidth; e++) begin : pack_prod_mant
+          assign prod_mant_packed[e] = {prod_mant_carry[s][c*JoinWidth+e],prod_mant_no_carry[s][c*JoinWidth+e]};
+        end
+
+        assign res_packed = prod_mant_packed + {prod_mant_lh,{(InCatWidth){1'b0}}} + {prod_mant_hl,{(InCatWidth){1'b0}}};
+
+        for (genvar e = 0; e < 2*JoinWidth; e++) begin : unpack_prod_mant
+          assign {prod_mant_carry[s+1][c*JoinWidth+e], prod_mant_no_carry[s+1][c*JoinWidth+e]} = res_packed[e];
+        end
+      end
 
       assign {exp_carry,prod_exp_no_carry[s+1][(c+2)*JoinWidth-1:c*JoinWidth]} = prod_exp_no_carry[s][(c+2)*JoinWidth-1:c*JoinWidth] + (cfg_i.num_joins > s ? {prod_exp_carry[s][(c+2)*JoinWidth-JoinWidth-1],{(InSuperFmtExpBits*JoinWidth){1'b0}}} : '0);
       assign prod_exp_carry[s+1][(c+2)*JoinWidth-1]                            = prod_exp_carry[s][(c+2)*JoinWidth-1] + exp_carry;
@@ -529,7 +570,7 @@ module auteur_dotp
     logic [ShiftAmountWidth-1:0] local_shift_adj;
 
     assign {overflow,local_shift}          = in_shift + in_shifts_norm[i];
-    assign {overflow_adj, local_shift_adj} = local_shift + ((MaxInWidth - i - 1) % (1<<cfg_i.num_joins)) * (InSuperFmtManBits * 2); // Adjust the local shift if it is part of a larger mantissa
+    assign {overflow_adj, local_shift_adj} = local_shift + ((MaxInWidth - i - 1) % (1<<cfg_i.num_joins)) * ((InSuperFmtManBits+InManUnnorm) * 2); // Adjust the local shift if it is part of a larger mantissa
     assign in_shifts_final_d[i]            = overflow || overflow_adj ? '1 : local_shift_adj;
   end
 

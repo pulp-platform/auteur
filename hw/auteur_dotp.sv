@@ -19,6 +19,7 @@ module auteur_dotp
 #(
   parameter int unsigned    NrIn = 1,
   parameter int unsigned    NrMaxJoins = 1,
+  parameter int unsigned    MxGroupSize = NrIn,
   parameter int unsigned    InSuperFmtManBits = 1,
   parameter int unsigned    InSuperFmtExpBits = 1,
   parameter int unsigned    OutSuperFmtManBits = 1,
@@ -33,6 +34,7 @@ module auteur_dotp
   parameter int unsigned    YDelay = 0,
   parameter int unsigned    ScalesDelay = 0,
   parameter dotp_pipe_cfg_t PipeCfg = '{default: '0},
+  localparam int unsigned   NrMxScales = NrIn/MxGroupSize,
 
   localparam type in_super_fmt_t = struct packed {
     logic                                     sign;
@@ -53,24 +55,24 @@ module auteur_dotp
     logic[$clog2(NrMaxJoins):0] num_joins;
   }
 ) (
-  input  logic                     clk_i,
-  input  logic                     rst_ni,
+  input  logic                                 clk_i,
+  input  logic                                 rst_ni,
 
-  input  dotp_cfg_t                cfg_i,
+  input  dotp_cfg_t                            cfg_i,
 
-  input  logic                     in_valid_i,
-  input  in_super_fmt_t [NrIn-1:0] x_i,
-  input  in_super_fmt_t [NrIn-1:0] w_i,
+  input  logic                                 in_valid_i,
+  input  in_super_fmt_t [NrIn-1:0]             x_i,
+  input  in_super_fmt_t [NrIn-1:0]             w_i,
 
-  input  logic                     y_valid_i,
-  input  out_super_fmt_t           y_i,
+  input  logic                                 y_valid_i,
+  input  out_super_fmt_t                       y_i,
 
-  input  logic                     scale_valid_i,
-  input  mx_scale_super_fmt_t      x_scale_i,
-  input  mx_scale_super_fmt_t      w_scale_i,
+  input  logic                                 scale_valid_i,
+  input  mx_scale_super_fmt_t [NrMxScales-1:0] x_scale_i,
+  input  mx_scale_super_fmt_t [NrMxScales-1:0] w_scale_i,
 
-  output logic                     out_valid_o,
-  output out_super_fmt_t           z_o
+  output logic                                 out_valid_o,
+  output out_super_fmt_t                       z_o
 );
   localparam int unsigned MantAccFracWidth = OutSuperFmtManBits + AccRoundBits;
   localparam int unsigned MantAccIntWidth  = $clog2(NrIn+1) + 3 + 1; // Maximum possible number of carry bits + largest mantissa overflow + implicit 1
@@ -78,6 +80,8 @@ module auteur_dotp
   localparam int unsigned ShiftAmountWidth = $clog2(3+1+MantAccFracWidth);
   localparam int unsigned MaxInWidth       = 1<<NrMaxJoins;
   localparam int unsigned NrInMaxWidth     = NrIn>>NrMaxJoins;
+  localparam int unsigned NrMxGroups       = NrIn/MxGroupSize;
+  localparam int unsigned MxGroupSizeMax   = MxGroupSize>>NrMaxJoins;
 
   localparam int unsigned OutSuperFmtBias = (1<<(OutSuperFmtExpBits-1)) - 1;
 
@@ -86,7 +90,9 @@ module auteur_dotp
                                                       w_sign_d, w_sign_q;
 
   logic [NrIn-1:0][InSuperFmtExpBits-1:0]             x_exp_d, x_exp_q,
-                                                      w_exp_d, w_exp_q;
+                                                      w_exp_d, w_exp_q,
+                                                      x_exp_denorm_check_d, x_exp_denorm_check_q,
+                                                      w_exp_denorm_check_d, w_exp_denorm_check_q;
 
   logic [NrIn-1:0][InSuperFmtManBits+InManUnnorm-1:0] x_mant_d, x_mant_q,
                                                       w_mant_d, w_mant_q;
@@ -95,25 +101,32 @@ module auteur_dotp
         in_valid_exp_d, in_valid_exp_q;
 
   for (genvar i = 0; i < NrIn; i++) begin : assign_pipe_inputs
-    assign x_sign_d[i] = x_i[i].sign;
-    assign x_exp_d[i]  = x_i[i].exponent;
-    assign x_mant_d[i] = x_i[i].mantissa;
+    assign x_sign_d[i]             = x_i[i].sign;
+    assign x_exp_d[i]              = x_i[i].exponent;
+    assign x_exp_denorm_check_d[i] = x_i[i].exponent;
+    assign x_mant_d[i]             = x_i[i].mantissa;
 
-    assign w_sign_d[i] = w_i[i].sign;
-    assign w_exp_d[i]  = w_i[i].exponent;
-    assign w_mant_d[i] = w_i[i].mantissa;
+    assign w_sign_d[i]             = w_i[i].sign;
+    assign w_exp_d[i]              = w_i[i].exponent;
+    assign w_exp_denorm_check_d[i] = w_i[i].exponent;
+    assign w_mant_d[i]             = w_i[i].mantissa;
   end
 
   assign in_valid_mant_d = in_valid_i;
   assign in_valid_exp_d  = in_valid_i;
 
-  `AUTEUR_PIPE(x_sign_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0]                                   , x_sign_d, x_sign_q, in_valid_mant_d)
-  `AUTEUR_PIPE(x_exp_pipe , PipeCfg.input_path.exponent_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0]            , x_exp_d , x_exp_q , in_valid_exp_d )
-  `AUTEUR_PIPE(x_mant_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtManBits+InManUnnorm-1:0], x_mant_d, x_mant_q, in_valid_mant_d)
+  // x/w_exp_denorm_check are here just to allow us to put a different number of registers in front of the mantissa and exponent path
+  // The synthesis tool will take care of merging them with x/w_exp
 
-  `AUTEUR_PIPE(w_sign_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0]                                   , w_sign_d, w_sign_q, in_valid_mant_d)
-  `AUTEUR_PIPE(w_exp_pipe , PipeCfg.input_path.exponent_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0]            , w_exp_d , w_exp_q , in_valid_exp_d )
-  `AUTEUR_PIPE(w_mant_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtManBits+InManUnnorm-1:0], w_mant_d, w_mant_q, in_valid_mant_d)
+  `AUTEUR_PIPE(x_sign_pipe            , PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0]                                   , x_sign_d            , x_sign_q            , in_valid_mant_d)
+  `AUTEUR_PIPE(x_exp_pipe             , PipeCfg.input_path.exponent_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0]            , x_exp_d             , x_exp_q             , in_valid_exp_d )
+  `AUTEUR_PIPE(x_exp_denorm_check_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0]            , x_exp_denorm_check_d, x_exp_denorm_check_q, in_valid_mant_d)
+  `AUTEUR_PIPE(x_mant_pipe            , PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtManBits+InManUnnorm-1:0], x_mant_d            , x_mant_q            , in_valid_mant_d)
+
+  `AUTEUR_PIPE(w_sign_pipe            , PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0]                                   , w_sign_d            , w_sign_q            , in_valid_mant_d)
+  `AUTEUR_PIPE(w_exp_pipe             , PipeCfg.input_path.exponent_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0]            , w_exp_d             , w_exp_q             , in_valid_exp_d )
+  `AUTEUR_PIPE(w_exp_denorm_check_pipe, PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0]            , w_exp_denorm_check_d, w_exp_denorm_check_q, in_valid_mant_d)
+  `AUTEUR_PIPE(w_mant_pipe            , PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtManBits+InManUnnorm-1:0], w_mant_d            , w_mant_q            , in_valid_mant_d)
 
   `AUTEUR_PIPE_VALID(in_valid_mant_pipe, PipeCfg.input_path.mantissa_path.inputs, in_valid_mant_d, in_valid_mant_q)
   `AUTEUR_PIPE_VALID(in_valid_exp_pipe , PipeCfg.input_path.exponent_path.inputs, in_valid_exp_d , in_valid_exp_q )
@@ -128,19 +141,56 @@ module auteur_dotp
   logic [NrMaxJoins:0][NrIn-1:0] prod_sign;
 
   for (genvar i = 0; i < NrIn; i++) begin : gen_initial_products
+    localparam int unsigned IterBoundMant = get_max_join_width(i, MaxInWidth);
+    localparam int unsigned IterBoundExp  = get_max_join_width(i+MaxInWidth-1, MaxInWidth);
+
+    // For convinience, we use two different denormal detectors for the mantissa path and exponent path.
+    // Hopefully, they will be mergeg during synthesis.
+    logic x_is_denormal_mant, w_is_denormal_mant;
+    logic x_is_denormal_exp, w_is_denormal_exp;
     logic x_lead, w_lead;
+
+    always_comb begin : mant_denormal_detector
+      x_is_denormal_mant = 1'b1;
+      w_is_denormal_mant = 1'b1;
+
+      for (int unsigned e = 0; e < (1<<cfg_i.num_joins) && e < IterBoundMant; e++) begin
+        if (|x_exp_denorm_check_q[i-e]) begin
+          x_is_denormal_mant = 1'b0;
+        end
+
+        if (|w_exp_denorm_check_q[i-e]) begin
+          w_is_denormal_mant = 1'b0;
+        end
+      end
+    end
+
+    always_comb begin : exp_denormal_detector
+      x_is_denormal_exp = 1'b1;
+      w_is_denormal_exp = 1'b1;
+
+      for (int unsigned e = 0; e < (1<<cfg_i.num_joins) && e < IterBoundExp; e++) begin
+        if (|x_exp_q[i+e]) begin
+          x_is_denormal_exp = 1'b0;
+        end
+
+        if (|w_exp_q[i+e]) begin
+          w_is_denormal_exp = 1'b0;
+        end
+      end
+    end
 
     // If the input mantissa is normalized, we statically set the leading bit
     if (InManUnnorm == 0) begin
-      assign x_lead = (i+1)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
-      assign w_lead = (i+1)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
+      assign x_lead = (i+1)%(1<<cfg_i.num_joins) == 0 ? ~x_is_denormal_mant : 1'b0;
+      assign w_lead = (i+1)%(1<<cfg_i.num_joins) == 0 ? ~w_is_denormal_mant : 1'b0;
     end else begin
-      assign x_lead = x_mant_q[i][InSuperFmtManBits];
-      assign w_lead = w_mant_q[i][InSuperFmtManBits];
+      assign x_lead = (i+1)%(1<<cfg_i.num_joins) == 0 ? ~x_is_denormal_mant : x_mant_q[i][InSuperFmtManBits];
+      assign w_lead = (i+1)%(1<<cfg_i.num_joins) == 0 ? ~w_is_denormal_mant : w_mant_q[i][InSuperFmtManBits];
     end
 
     assign {prod_mant_carry[0][i],prod_mant_no_carry[0][i]} = {x_lead,x_mant_q[i][InSuperFmtManBits-1:0]}*{w_lead,w_mant_q[i][InSuperFmtManBits-1:0]};
-    assign {prod_exp_carry[0][i],prod_exp_no_carry[0][i]} = x_exp_q[i] + w_exp_q[i];
+    assign {prod_exp_carry[0][i],prod_exp_no_carry[0][i]} = x_exp_q[i] + w_exp_q[i] + x_is_denormal_exp + w_is_denormal_exp;
     assign prod_sign[0][i] = x_sign_q[i] ^ w_sign_q[i];
   end
 
@@ -267,30 +317,46 @@ module auteur_dotp
   `AUTEUR_FIFO(prod_exp_carry_fifo   , get_exp_mant_input_margin(PipeCfg), logic [NrIn-1:0]                       , prod_exp_carry_fifo_d   , prod_exp_carry_fifo_q   , prod_exp_valid_fifo_d, prod_exp_valid_fifo_q)
 
 
-  logic                              x_scale_sign_fifo_q, w_scale_sign_fifo_q;
-  logic [MxScaleSuperFmtExpBits-1:0] x_scale_exp_fifo_q, w_scale_exp_fifo_q;
-  logic [MxScaleSuperFmtManBits-1:0] x_scale_mant_fifo_q, w_scale_mant_fifo_q;
+  logic [NrMxGroups-1:0]                             x_scale_sign_fifo_d, w_scale_sign_fifo_d, x_scale_sign_fifo_q, w_scale_sign_fifo_q;
+  logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0] x_scale_exp_fifo_d, w_scale_exp_fifo_d, x_scale_exp_fifo_q, w_scale_exp_fifo_q,
+                                                     x_scale_exp_denorm_check_fifo_d, w_scale_exp_denorm_check_fifo_d, x_scale_exp_denorm_check_fifo_q, w_scale_exp_denorm_check_fifo_q;
+  logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0] x_scale_mant_fifo_d, w_scale_mant_fifo_d, x_scale_mant_fifo_q, w_scale_mant_fifo_q;
 
   logic in_valid_mant_scales_fifo;
   logic in_valid_exp_scales_fifo;
+
+  for (genvar g = 0; g < NrMxGroups; g++) begin : assign_scales_fifo_inputs
+    assign x_scale_sign_fifo_d[g] = x_scale_i[g].sign;
+    assign x_scale_exp_fifo_d[g]  = x_scale_i[g].exponent;
+    assign x_scale_mant_fifo_d[g] = x_scale_i[g].mantissa;
+    assign w_scale_sign_fifo_d[g] = w_scale_i[g].sign;
+    assign w_scale_exp_fifo_d[g]  = w_scale_i[g].exponent;
+    assign w_scale_mant_fifo_d[g] = w_scale_i[g].mantissa;
+  end
+
+  assign x_scale_exp_denorm_check_fifo_d = x_scale_exp_fifo_d;
+  assign w_scale_exp_denorm_check_fifo_d = w_scale_exp_fifo_d;
 
   // These pipes are here only to simplify the code, hopefully the synthesis tool will merge these with the one in the join stages
   `AUTEUR_PIPE_VALID(in_valid_mant_scales_fifo_pipe, get_mant_scales_inputs_margin(PipeCfg), in_valid_i, in_valid_mant_scales_fifo)
   `AUTEUR_PIPE_VALID(in_valid_exp_scales_fifo_pipe , get_exp_scales_inputs_margin(PipeCfg) , in_valid_i, in_valid_exp_scales_fifo )
 
-  `AUTEUR_FIFO(x_scale_sign_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic                             , x_scale_i.sign    , x_scale_sign_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
-  `AUTEUR_FIFO(x_scale_exp_fifo , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [MxScaleSuperFmtExpBits-1:0], x_scale_i.exponent, x_scale_exp_fifo_q , scale_valid_i, in_valid_exp_scales_fifo )
-  `AUTEUR_FIFO(x_scale_mant_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [MxScaleSuperFmtManBits-1:0], x_scale_i.mantissa, x_scale_mant_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
+  `AUTEUR_FIFO(x_scale_sign_fifo            , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0]                            , x_scale_sign_fifo_d            , x_scale_sign_fifo_q            , scale_valid_i, in_valid_mant_scales_fifo)
+  `AUTEUR_FIFO(x_scale_exp_fifo             , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_d             , x_scale_exp_fifo_q             , scale_valid_i, in_valid_exp_scales_fifo )
+  `AUTEUR_FIFO(x_scale_exp_denorm_check_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], x_scale_exp_denorm_check_fifo_d, x_scale_exp_denorm_check_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
+  `AUTEUR_FIFO(x_scale_mant_fifo            , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0], x_scale_mant_fifo_d            , x_scale_mant_fifo_q            , scale_valid_i, in_valid_mant_scales_fifo)
 
-  `AUTEUR_FIFO(w_scale_sign_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic                             , w_scale_i.sign    , w_scale_sign_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
-  `AUTEUR_FIFO(w_scale_exp_fifo , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [MxScaleSuperFmtExpBits-1:0], w_scale_i.exponent, w_scale_exp_fifo_q , scale_valid_i, in_valid_exp_scales_fifo )
-  `AUTEUR_FIFO(w_scale_mant_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [MxScaleSuperFmtManBits-1:0], w_scale_i.mantissa, w_scale_mant_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
+  `AUTEUR_FIFO(w_scale_sign_fifo            , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0]                            , w_scale_sign_fifo_d            , w_scale_sign_fifo_q            , scale_valid_i, in_valid_mant_scales_fifo)
+  `AUTEUR_FIFO(w_scale_exp_fifo             , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], w_scale_exp_fifo_d             , w_scale_exp_fifo_q             , scale_valid_i, in_valid_exp_scales_fifo )
+  `AUTEUR_FIFO(w_scale_exp_denorm_check_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], w_scale_exp_denorm_check_fifo_d, w_scale_exp_denorm_check_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
+  `AUTEUR_FIFO(w_scale_mant_fifo            , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0], w_scale_mant_fifo_d            , w_scale_mant_fifo_q            , scale_valid_i, in_valid_mant_scales_fifo)
 
 
   //Movable registers for the scales
-  logic                              x_scale_sign_q, w_scale_sign_q;
-  logic [MxScaleSuperFmtExpBits-1:0] x_scale_exp_q, w_scale_exp_q;
-  logic [MxScaleSuperFmtManBits-1:0] x_scale_mant_q, w_scale_mant_q;
+  logic [NrMxScales-1:0]                             x_scale_sign_q, w_scale_sign_q;
+  logic [NrMxScales-1:0][MxScaleSuperFmtExpBits-1:0] x_scale_exp_q, w_scale_exp_q,
+                                                     x_scale_exp_denorm_check_q, w_scale_exp_denorm_check_q;
+  logic [NrMxScales-1:0][MxScaleSuperFmtManBits-1:0] x_scale_mant_q, w_scale_mant_q;
 
   logic in_valid_mant_scales;
   logic in_valid_exp_scales;
@@ -298,47 +364,15 @@ module auteur_dotp
   `AUTEUR_PIPE_VALID(in_valid_mant_scales_pipe, PipeCfg.scale_path.mantissa_path.inputs, in_valid_mant_scales_fifo, in_valid_mant_scales)
   `AUTEUR_PIPE_VALID(in_valid_exp_scales_pipe , PipeCfg.scale_path.exponent_path.inputs, in_valid_exp_scales_fifo , in_valid_exp_scales )
 
-  `AUTEUR_PIPE(x_scale_sign_pipe, PipeCfg.scale_path.mantissa_path.inputs, logic                             , x_scale_sign_fifo_q, x_scale_sign_q, in_valid_mant_scales_fifo)
-  `AUTEUR_PIPE(x_scale_exp_pipe , PipeCfg.scale_path.exponent_path.inputs, logic [MxScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_q , x_scale_exp_q , in_valid_exp_scales_fifo )
-  `AUTEUR_PIPE(x_scale_mant_pipe, PipeCfg.scale_path.mantissa_path.inputs, logic [MxScaleSuperFmtManBits-1:0], x_scale_mant_fifo_q, x_scale_mant_q, in_valid_mant_scales_fifo)
+  `AUTEUR_PIPE(x_scale_sign_pipe            , PipeCfg.scale_path.mantissa_path.inputs, logic [NrMxScales-1:0]                            , x_scale_sign_fifo_q            , x_scale_sign_q            , in_valid_mant_scales_fifo)
+  `AUTEUR_PIPE(x_scale_exp_pipe             , PipeCfg.scale_path.exponent_path.inputs, logic [NrMxScales-1:0][MxScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_q             , x_scale_exp_q             , in_valid_exp_scales_fifo )
+  `AUTEUR_PIPE(x_scale_exp_denorm_check_pipe, PipeCfg.scale_path.mantissa_path.inputs, logic [NrMxScales-1:0][MxScaleSuperFmtExpBits-1:0], x_scale_exp_denorm_check_fifo_q, x_scale_exp_denorm_check_q, in_valid_mant_scales_fifo)
+  `AUTEUR_PIPE(x_scale_mant_pipe            , PipeCfg.scale_path.mantissa_path.inputs, logic [NrMxScales-1:0][MxScaleSuperFmtManBits-1:0], x_scale_mant_fifo_q            , x_scale_mant_q            , in_valid_mant_scales_fifo)
 
-  `AUTEUR_PIPE(w_scale_sign_pipe, PipeCfg.scale_path.mantissa_path.inputs, logic                             , w_scale_sign_fifo_q, w_scale_sign_q, in_valid_mant_scales_fifo)
-  `AUTEUR_PIPE(w_scale_exp_pipe , PipeCfg.scale_path.exponent_path.inputs, logic [MxScaleSuperFmtExpBits-1:0], w_scale_exp_fifo_q , w_scale_exp_q , in_valid_exp_scales_fifo )
-  `AUTEUR_PIPE(w_scale_mant_pipe, PipeCfg.scale_path.mantissa_path.inputs, logic [MxScaleSuperFmtManBits-1:0], w_scale_mant_fifo_q, w_scale_mant_q, in_valid_mant_scales_fifo)
-
-
-  // Zero Detectors
-
-  logic [NrIn-1:0] either_in_is_zero_d, either_in_is_zero_q;
-
-  for (genvar i = 0; i < NrIn; i++) begin : gen_input_zero_detector
-    logic [$clog2(NrIn)-1:0] fmt_start;
-    logic [NrMaxJoins-1:0]   fmt_width;
-
-    logic                    x_is_zero,
-                             w_is_zero;
-
-    assign fmt_width = 1<<cfg_i.num_joins;
-    assign fmt_start = i & ~(fmt_width-1);
-
-    always_comb begin
-      x_is_zero = 1'b1;
-      w_is_zero = 1'b1;
-
-      for (int unsigned e = 0; e < fmt_width; e++) begin
-        x_is_zero &= ~|x_exp_q[fmt_start+e];
-        w_is_zero &= ~|w_exp_q[fmt_start+e];
-      end
-    end
-
-    assign either_in_is_zero_d[i] = x_is_zero || w_is_zero;
-  end
-
-  `AUTEUR_PIPE(either_in_is_zero_pipe, PipeCfg.input_path.mantissa_path.input_products, logic [NrIn-1:0], either_in_is_zero_d, either_in_is_zero_q, in_valid_mant_q)
-
-  logic either_scale_is_zero;
-
-  assign either_scale_is_zero = ~|x_scale_exp_q || ~|w_scale_exp_q;
+  `AUTEUR_PIPE(w_scale_sign_pipe            , PipeCfg.scale_path.mantissa_path.inputs, logic [NrMxScales-1:0]                            , w_scale_sign_fifo_q            , w_scale_sign_q            , in_valid_mant_scales_fifo)
+  `AUTEUR_PIPE(w_scale_exp_pipe             , PipeCfg.scale_path.exponent_path.inputs, logic [NrMxScales-1:0][MxScaleSuperFmtExpBits-1:0], w_scale_exp_fifo_q             , w_scale_exp_q             , in_valid_exp_scales_fifo )
+  `AUTEUR_PIPE(w_scale_exp_denorm_check_pipe, PipeCfg.scale_path.mantissa_path.inputs, logic [NrMxScales-1:0][MxScaleSuperFmtExpBits-1:0], w_scale_exp_denorm_check_fifo_q, w_scale_exp_denorm_check_q, in_valid_mant_scales_fifo)
+  `AUTEUR_PIPE(w_scale_mant_pipe            , PipeCfg.scale_path.mantissa_path.inputs, logic [NrMxScales-1:0][MxScaleSuperFmtManBits-1:0], w_scale_mant_fifo_q            , w_scale_mant_q            , in_valid_mant_scales_fifo)
 
 
   logic [NrIn-1:0][2*InSuperFmtManBits-1:0] in_prod_mant_no_carry;
@@ -347,167 +381,204 @@ module auteur_dotp
   logic [NrIn-1:0]                          in_prod_exp_carry;
   logic [NrIn-1:0]                          in_prod_sign;
 
-  for (genvar i = 0; i < NrIn; i++) begin : filter_mantissae
-    assign in_prod_mant_no_carry[i] = either_in_is_zero_q[i] ? '0 : prod_mant_no_carry_q[i];
-    assign in_prod_mant_carry[i]    = either_in_is_zero_q[i] ? '0 : prod_mant_carry_q[i];
-  end
+  assign in_prod_mant_no_carry = prod_mant_no_carry_q;
+  assign in_prod_mant_carry    = prod_mant_carry_q;
 
   assign in_prod_exp_no_carry  = prod_exp_no_carry_fifo_q;
   assign in_prod_exp_carry     = prod_exp_carry_fifo_q;
   assign in_prod_sign          = prod_sign_q;
 
 
-  logic [2*MxScaleSuperFmtManBits+1:0] scale_prod_mant_d, scale_prod_mant_q;
-  logic [MxScaleSuperFmtExpBits:0]     scale_prod_exp_d, scale_prod_exp_q;
-  logic                                scale_prod_sign_d, scale_prod_sign_q;
+  logic [NrMxScales-1:0][2*MxScaleSuperFmtManBits+1:0] scale_prod_mant_d, scale_prod_mant_q;
+  logic [NrMxScales-1:0][MxScaleSuperFmtExpBits:0]     scale_prod_exp_d, scale_prod_exp_q;
+  logic [NrMxScales-1:0]                               scale_prod_sign_d, scale_prod_sign_q;
 
-  logic                                scale_prod_mant_valid_d, scale_prod_mant_valid_q;
-  logic                                scale_prod_exp_valid_d, scale_prod_exp_valid_q;
+  logic                                                scale_prod_mant_valid_d, scale_prod_mant_valid_q;
+  logic                                                scale_prod_exp_valid_d, scale_prod_exp_valid_q;
 
-  assign scale_prod_mant_d = either_scale_is_zero ? '0 : {1'b1,x_scale_mant_q}*{1'b1,w_scale_mant_q};
-  assign scale_prod_exp_d  = x_scale_exp_q + w_scale_exp_q;
-  assign scale_prod_sign_d = x_scale_sign_q ^ w_scale_sign_q;
+  for (genvar g = 0; g < NrMxGroups; g++) begin : assign_scale_products
+    logic x_scales_lead;
+    logic w_scales_lead;
+
+    logic x_scales_denorm;
+    logic w_scales_denorm;
+
+    assign x_scales_lead   = |x_scale_exp_denorm_check_q[g];
+    assign w_scales_lead   = |w_scale_exp_denorm_check_q[g];
+
+    assign x_scales_denorm = ~|x_scale_exp_q[g];
+    assign w_scales_denorm = ~|w_scale_exp_q[g];
+
+    assign scale_prod_mant_d[g] = {x_scales_lead,x_scale_mant_q[g]}*{w_scales_lead,w_scale_mant_q[g]};
+    assign scale_prod_exp_d[g]  = x_scale_exp_q[g] + w_scale_exp_q[g] + x_scales_denorm + w_scales_denorm;
+    assign scale_prod_sign_d[g] = x_scale_sign_q[g] ^ w_scale_sign_q[g];
+  end
 
   assign scale_prod_mant_valid_d = in_valid_mant_scales;
   assign scale_prod_exp_valid_d  = in_valid_exp_scales;
 
-  `AUTEUR_PIPE(scale_prod_mant_pipe, PipeCfg.scale_path.mantissa_path.scale_product, logic [2*MxScaleSuperFmtManBits+1:0], scale_prod_mant_d, scale_prod_mant_q, scale_prod_mant_valid_d)
-  `AUTEUR_PIPE(scale_prod_exp_pipe , PipeCfg.scale_path.exponent_path.scale_product, logic [MxScaleSuperFmtExpBits:0]    , scale_prod_exp_d , scale_prod_exp_q , scale_prod_exp_valid_d )
-  `AUTEUR_PIPE(scale_prod_sign_pipe, PipeCfg.scale_path.mantissa_path.scale_product, logic                               , scale_prod_sign_d, scale_prod_sign_q, scale_prod_mant_valid_d)
+  `AUTEUR_PIPE(scale_prod_mant_pipe, PipeCfg.scale_path.mantissa_path.scale_product, logic [NrMxScales-1:0][2*MxScaleSuperFmtManBits+1:0], scale_prod_mant_d, scale_prod_mant_q, scale_prod_mant_valid_d)
+  `AUTEUR_PIPE(scale_prod_exp_pipe , PipeCfg.scale_path.exponent_path.scale_product, logic [NrMxScales-1:0][MxScaleSuperFmtExpBits:0]    , scale_prod_exp_d , scale_prod_exp_q , scale_prod_exp_valid_d )
+  `AUTEUR_PIPE(scale_prod_sign_pipe, PipeCfg.scale_path.mantissa_path.scale_product, logic [NrMxScales-1:0]                              , scale_prod_sign_d, scale_prod_sign_q, scale_prod_mant_valid_d)
 
   `AUTEUR_PIPE_VALID(scale_prod_mant_valid_pipe, PipeCfg.scale_path.mantissa_path.scale_product, scale_prod_mant_valid_d, scale_prod_mant_valid_q)
   `AUTEUR_PIPE_VALID(scale_prod_exp_valid_pipe , PipeCfg.scale_path.exponent_path.scale_product, scale_prod_exp_valid_d , scale_prod_exp_valid_q )
 
 
-  // ASSUMPTION: no supported input format can have more exponent bits than the output super format
-  // NOTE: there is one more bit since the surplus bias has not been subtracted yet
-  logic [$clog2(NrInMaxWidth):0][NrInMaxWidth-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_tree_stages;
-  logic [NrMaxJoins:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_narrow_tree_stages;
-
-  logic [MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps;
-
-  for (genvar n = 0; n < NrIn; n += MaxInWidth) begin : gen_max_tree_initial_nodes
-    for (genvar e = 0; e < MaxInWidth; e++) begin : assign_elements
-      assign max_in_prod_exps_tree_stages[0][n>>NrMaxJoins][e] = {in_prod_exp_carry[n+e],in_prod_exp_no_carry[n+e]};
-    end
-  end
-
-  // The max tree is generated wrt the largest supported input format
-  for (genvar s = 0; s < $clog2(NrInMaxWidth); s++) begin : gen_max_tree
-    for (genvar n = 0; n < NrIn>>(NrMaxJoins+s); n+=2) begin : gen_nodes
-      logic [MaxInWidth-1:0][1:0] comp_carry_out;
-
-      for (genvar c = 0; c < MaxInWidth; c++) begin : gen_comparators
-        logic [1:0] comp_carry_in;
-
-        assign comp_carry_in[0] = (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][0];
-        assign comp_carry_in[1] = (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][1];
-
-        assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} >= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};
-        assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} <  {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};
-
-        assign max_in_prod_exps_tree_stages[s+1][n>>1][c] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} >= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]} ? max_in_prod_exps_tree_stages[s][n][c] : max_in_prod_exps_tree_stages[s][n+1][c];
-      end
-    end
-  end
-
-  assign max_in_prod_exps_narrow_tree_stages[0] = max_in_prod_exps_tree_stages[$clog2(NrInMaxWidth)][0];
-
-  // For the narrower formats, a smaller tree is generated
-  for (genvar s = 0; s < NrMaxJoins; s++) begin : gen_narrow_max_tree
-    localparam int unsigned NodeWidth = 1<<(NrMaxJoins-s-1);
-
-    for (genvar n = 0; n < MaxInWidth; n+=2*NodeWidth) begin : gen_nodes
-      logic [NodeWidth-1:0][1:0] comp_carry_out;
-
-      for (genvar c = 0; c < NodeWidth; c++) begin : gen_comparators
-        logic [1:0] comp_carry_in;
-
-        assign comp_carry_in[0] = c == NodeWidth-1 ? s>=(NrMaxJoins-cfg_i.num_joins) : (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][0];
-        assign comp_carry_in[1] = c == NodeWidth-1 ? 1'b0                            : (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][1];
-
-        assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
-        assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} <  {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
-
-        assign max_in_prod_exps_narrow_tree_stages[s+1][n+c]           = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]} ? max_in_prod_exps_narrow_tree_stages[s][n+c] : max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c];
-        assign max_in_prod_exps_narrow_tree_stages[s+1][n+NodeWidth+c] = s>=(NrMaxJoins-cfg_i.num_joins) ? max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c] : max_in_prod_exps_narrow_tree_stages[s+1][n+c];
-      end
-    end
-  end
-
-  assign max_in_prod_exps = max_in_prod_exps_narrow_tree_stages[NrMaxJoins];
-
-  // Now that we have the maximum exponent:
-  //  - we use it to calculate the shifts for each of the elements
-  //  - we calculate the actual exponent value (using OutSuperFmtExpBits) and use it to compute the shift wrt y_i
-
+  logic [NrMxGroups-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0]   max_in_prod_exps;
   logic [NrInMaxWidth-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] in_shifts_wrt_in_d, in_shifts_wrt_in_q;
 
-  for (genvar i = 0; i < NrInMaxWidth; i++) begin : assign_shifts
-    logic [MaxInWidth-1:0][InSuperFmtExpBits:0] exp_packed;
+  // Find the maximum exponent for each MX group
+  for (genvar g = 0; g < NrMxGroups; g++) begin : gen_groups_max_trees
+    localparam MxGroupOffset = g*MxGroupSize;
 
-    for (genvar e = 0; e < MaxInWidth; e++) begin
-      assign exp_packed[e] = {in_prod_exp_carry[i*MaxInWidth+e],in_prod_exp_no_carry[i*MaxInWidth+e]};
+    // ASSUMPTION: no supported input format can have more exponent bits than the output super format
+    // NOTE: there is one more bit since the surplus bias has not been subtracted yet
+    logic [$clog2(MxGroupSizeMax):0][MxGroupSizeMax-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_tree_stages;
+    logic [NrMaxJoins:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_narrow_tree_stages;
+
+    for (genvar n = 0; n < MxGroupSize; n += MaxInWidth) begin : gen_max_tree_initial_nodes
+      for (genvar e = 0; e < MaxInWidth; e++) begin : assign_elements
+        assign max_in_prod_exps_tree_stages[0][n>>NrMaxJoins][e] = {in_prod_exp_carry[n+e+MxGroupOffset],in_prod_exp_no_carry[n+e+MxGroupOffset]};
+      end
     end
 
-    assign in_shifts_wrt_in_d[i] = max_in_prod_exps - exp_packed;
-  end
+    // The max tree is generated wrt the largest supported input format
+    for (genvar s = 0; s < $clog2(MxGroupSizeMax); s++) begin : gen_max_tree
+      for (genvar n = 0; n < NrIn>>(NrMaxJoins+s); n+=2) begin : gen_nodes
+        logic [MaxInWidth-1:0][1:0] comp_carry_out;
 
+        for (genvar c = 0; c < MaxInWidth; c++) begin : gen_comparators
+          logic [1:0] comp_carry_in;
 
-  logic [MaxInWidth*InSuperFmtExpBits:0] max_in_prod_exps_norm_wide;
+          assign comp_carry_in[0] = (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][0];
+          assign comp_carry_in[1] = (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][1];
 
-  logic [OutSuperFmtExpBits:0]           max_in_prod_exps_norm_wide_pad,
-                                         scale_prod_exp_pad;
+          assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} >= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};
+          assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} <  {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};
 
-  logic [OutSuperFmtExpBits-1:0]         inputs_max_exp_norm;
-  logic                                  inputs_max_exp_overflow;
-  logic [OutSuperFmtExpBits:0]           scale_exp_norm;
-
-  logic [OutSuperFmtExpBits-1:0]         in_scale_prod_exp_norm_d, in_scale_prod_exp_norm_q;
-  logic                                  in_scale_prod_exp_norm_overflow;
-
-  logic                                  maximum_exponent_overflow_d, maximum_exponent_overflow_q;
-
-  logic                                  maximum_exponent_valid_d, maximum_exponent_valid_q;
-
-  always_comb begin : assign_max_in_prod_exps_norm_wide
-    max_in_prod_exps_norm_wide = '0;
-
-    for (int unsigned e = 0; e < 1<<cfg_i.num_joins; e++) begin
-      max_in_prod_exps_norm_wide[e*InSuperFmtExpBits+:InSuperFmtExpBits] = max_in_prod_exps[e][InSuperFmtExpBits-1:0];
-      max_in_prod_exps_norm_wide[MaxInWidth*InSuperFmtExpBits-:1]        = max_in_prod_exps[e][InSuperFmtExpBits-:1];
+          assign max_in_prod_exps_tree_stages[s+1][n>>1][c] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} >= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]} ? max_in_prod_exps_tree_stages[s][n][c] : max_in_prod_exps_tree_stages[s][n+1][c];
+        end
+      end
     end
 
-    for (int unsigned i = (1<<cfg_i.num_joins)*InSuperFmtExpBits; i < MaxInWidth*InSuperFmtExpBits; i++) begin
-      max_in_prod_exps_norm_wide[i] = ~max_in_prod_exps_norm_wide[MaxInWidth*InSuperFmtExpBits];
+    assign max_in_prod_exps_narrow_tree_stages[0] = max_in_prod_exps_tree_stages[$clog2(MxGroupSizeMax)][0];
+
+    // For the narrower formats, a smaller tree is generated
+    for (genvar s = 0; s < NrMaxJoins; s++) begin : gen_narrow_max_tree
+      localparam int unsigned NodeWidth = 1<<(NrMaxJoins-s-1);
+
+      for (genvar n = 0; n < MaxInWidth; n+=2*NodeWidth) begin : gen_nodes
+        logic [NodeWidth-1:0][1:0] comp_carry_out;
+
+        for (genvar c = 0; c < NodeWidth; c++) begin : gen_comparators
+          logic [1:0] comp_carry_in;
+
+          assign comp_carry_in[0] = c == NodeWidth-1 ? s>=(NrMaxJoins-cfg_i.num_joins) : (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][0];
+          assign comp_carry_in[1] = c == NodeWidth-1 ? 1'b0                            : (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][1];
+
+          assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
+          assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} <  {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
+
+          assign max_in_prod_exps_narrow_tree_stages[s+1][n+c]           = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]} ? max_in_prod_exps_narrow_tree_stages[s][n+c] : max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c];
+          assign max_in_prod_exps_narrow_tree_stages[s+1][n+NodeWidth+c] = s>=(NrMaxJoins-cfg_i.num_joins) ? max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c] : max_in_prod_exps_narrow_tree_stages[s+1][n+c];
+        end
+      end
+    end
+
+    assign max_in_prod_exps[g] = max_in_prod_exps_narrow_tree_stages[NrMaxJoins];
+
+    // Now that we have the maximum exponent:
+    //  - we use it to calculate the shifts for each of the elements
+    //  - we calculate the actual exponent value (using OutSuperFmtExpBits) and use it to compute the shift wrt y_i
+    for (genvar i = 0; i < MxGroupSizeMax; i++) begin : assign_shifts
+      logic [MaxInWidth-1:0][InSuperFmtExpBits:0] exp_packed;
+
+      for (genvar e = 0; e < MaxInWidth; e++) begin
+        assign exp_packed[e] = {in_prod_exp_carry[i*MaxInWidth+e+MxGroupOffset],in_prod_exp_no_carry[i*MaxInWidth+e+MxGroupOffset]};
+      end
+
+      assign in_shifts_wrt_in_d[i+MxGroupOffset/MaxInWidth] = max_in_prod_exps[g] - exp_packed;
     end
   end
 
-  // Pad max_in_prod_exps_norm_wide and scale_prod_exp if they are shorter than OutSuperFmtExpBits
-  if (MaxInWidth*InSuperFmtExpBits < OutSuperFmtExpBits) begin
-    assign max_in_prod_exps_norm_wide_pad = {max_in_prod_exps_norm_wide[MaxInWidth*InSuperFmtExpBits-:2],{(OutSuperFmtExpBits-MaxInWidth*InSuperFmtExpBits){1'b0}},max_in_prod_exps_norm_wide[MaxInWidth*InSuperFmtExpBits-2:0]};
-  end else begin
-    assign max_in_prod_exps_norm_wide_pad = {max_in_prod_exps_norm_wide[MaxInWidth*InSuperFmtExpBits-:2],max_in_prod_exps_norm_wide[OutSuperFmtExpBits-2:0]};
+
+  logic [NrMxGroups-1:0][MaxInWidth*InSuperFmtExpBits:0] max_in_prod_exps_norm_wide;
+
+  logic [NrMxGroups-1:0][OutSuperFmtExpBits:0]           max_in_prod_exps_norm_wide_pad,
+                                                         scale_prod_exp_pad;
+
+  logic [NrMxGroups-1:0][OutSuperFmtExpBits-1:0]         inputs_max_exp_norm;
+  logic [NrMxGroups-1:0]                                 inputs_max_exp_overflow;
+  logic [NrMxGroups-1:0][OutSuperFmtExpBits:0]           scale_exp_norm;
+
+  logic [NrMxGroups-1:0][OutSuperFmtExpBits-1:0]         in_scale_prod_exp_norm_d;
+  logic [NrMxGroups-1:0]                                 in_scale_prod_exp_norm_overflow;
+
+  logic [OutSuperFmtExpBits-1:0]                         absolute_max_exp_d, absolute_max_exp_q;
+
+  logic [NrMxGroups-1:0][OutSuperFmtExpBits-1:0]         scale_shift_adj_d, scale_shift_adj_q;
+
+  logic                                                  maximum_exponent_overflow_d, maximum_exponent_overflow_q;
+
+  logic                                                  maximum_exponent_valid_d, maximum_exponent_valid_q;
+
+  for (genvar g = 0; g < NrMxGroups; g++) begin : assign_max_in_prod_exps_norm_wide
+    always_comb begin : assign_group_max_in_prod_exps_norm_wide
+      max_in_prod_exps_norm_wide[g] = '0;
+
+      for (int unsigned e = 0; e < 1<<cfg_i.num_joins; e++) begin
+        max_in_prod_exps_norm_wide[g][e*InSuperFmtExpBits+:InSuperFmtExpBits] = max_in_prod_exps[g][e][InSuperFmtExpBits-1:0];
+        max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits-:1]        = max_in_prod_exps[g][e][InSuperFmtExpBits-:1];
+      end
+
+      for (int unsigned i = (1<<cfg_i.num_joins)*InSuperFmtExpBits; i < MaxInWidth*InSuperFmtExpBits; i++) begin
+        max_in_prod_exps_norm_wide[g][i] = ~max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits];
+      end
+    end
+
+    // Pad max_in_prod_exps_norm_wide and scale_prod_exp if they are shorter than OutSuperFmtExpBits
+    if (MaxInWidth*InSuperFmtExpBits < OutSuperFmtExpBits) begin
+      assign max_in_prod_exps_norm_wide_pad[g] = {max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits-:2],{(OutSuperFmtExpBits-MaxInWidth*InSuperFmtExpBits){1'b0}},max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits-2:0]};
+    end else begin
+      assign max_in_prod_exps_norm_wide_pad[g] = {max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits-:2],max_in_prod_exps_norm_wide[g][OutSuperFmtExpBits-2:0]};
+    end
+
+    if (MxScaleSuperFmtExpBits < OutSuperFmtExpBits) begin
+      assign scale_prod_exp_pad[g] = {scale_prod_exp_q[g][MxScaleSuperFmtExpBits-:2],{(OutSuperFmtManBits-MxScaleSuperFmtExpBits){1'b0}},scale_prod_exp_q[g][MxScaleSuperFmtExpBits-2:0]};
+    end else begin
+      assign scale_prod_exp_pad[g] = scale_prod_exp_q[g][MxScaleSuperFmtExpBits-:OutSuperFmtExpBits+1];
+    end
+
+    // Again, here we assume no valid input format can have more exponent bits than the output super format
+    assign {inputs_max_exp_overflow[g],inputs_max_exp_norm[g]} = max_in_prod_exps_norm_wide_pad[g] - OutSuperFmtBias;
+
+    assign scale_exp_norm[g]                                                = scale_prod_exp_pad[g] - OutSuperFmtBias;
+    assign {in_scale_prod_exp_norm_overflow[g],in_scale_prod_exp_norm_d[g]} = inputs_max_exp_norm[g] + scale_exp_norm[g] - OutSuperFmtBias;
   end
 
-  if (MxScaleSuperFmtExpBits < OutSuperFmtExpBits) begin
-    assign scale_prod_exp_pad = {scale_prod_exp_q[MxScaleSuperFmtExpBits-:2],{(OutSuperFmtManBits-MxScaleSuperFmtExpBits){1'b0}},scale_prod_exp_q[MxScaleSuperFmtExpBits-2:0]};
-  end else begin
-    assign scale_prod_exp_pad = scale_prod_exp_q[MxScaleSuperFmtExpBits-:OutSuperFmtExpBits+1];
+  // We now find the absolue maximum exponent and use it to calculate the shift adjustments
+  always_comb begin : assign_absolute_max_exp
+    absolute_max_exp_d = '0;
+
+    for (int unsigned g = 0; g < NrMxGroups; g++) begin
+      if (in_scale_prod_exp_norm_d[g] > absolute_max_exp_d) begin
+        absolute_max_exp_d = in_scale_prod_exp_norm_d[g];
+      end
+    end
   end
 
-  // Again, here we assume no valid input format can have more exponent bits than the output super format
-  assign {inputs_max_exp_overflow,inputs_max_exp_norm} = max_in_prod_exps_norm_wide_pad - OutSuperFmtBias;
+  for (genvar g = 0; g < NrMxGroups; g++) begin : assign_scale_shift_adj
+    assign scale_shift_adj_d[g] = absolute_max_exp_d - in_scale_prod_exp_norm_d[g];
+  end
 
-  assign scale_exp_norm                                             = scale_prod_exp_pad - OutSuperFmtBias;
-  assign {in_scale_prod_exp_norm_overflow,in_scale_prod_exp_norm_d} = inputs_max_exp_norm + scale_exp_norm - OutSuperFmtBias;
-
-  assign maximum_exponent_overflow_d = in_scale_prod_exp_norm_overflow || inputs_max_exp_overflow;
+  assign maximum_exponent_overflow_d = |in_scale_prod_exp_norm_overflow || |inputs_max_exp_overflow;
 
   assign maximum_exponent_valid_d = prod_exp_valid_fifo_q;
 
-  `AUTEUR_PIPE(in_shifts_wrt_in_pipe      , PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrInMaxWidth-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0], in_shifts_wrt_in_d, in_shifts_wrt_in_q, maximum_exponent_valid_d)
-  `AUTEUR_PIPE(in_scale_prod_exp_norm_pipe, PipeCfg.input_path.exponent_path.maximum_exponent, logic [OutSuperFmtExpBits-1:0]                               , in_scale_prod_exp_norm_d, in_scale_prod_exp_norm_q, maximum_exponent_valid_d)
+  `AUTEUR_PIPE(in_shifts_wrt_in_pipe      , PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrInMaxWidth-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0], in_shifts_wrt_in_d      , in_shifts_wrt_in_q      , maximum_exponent_valid_d)
+  `AUTEUR_PIPE(absolute_max_exp_pipe      , PipeCfg.input_path.exponent_path.maximum_exponent, logic [OutSuperFmtExpBits-1:0]                               , absolute_max_exp_d      , absolute_max_exp_q      , maximum_exponent_valid_d)
+  `AUTEUR_PIPE(scale_shift_adj_pipe       , PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrMxScales-1:0][OutSuperFmtExpBits-1:0]               , scale_shift_adj_d       , scale_shift_adj_q       , maximum_exponent_valid_d)
   `AUTEUR_PIPE_VALID(in_scale_prod_exp_norm_valid, PipeCfg.input_path.exponent_path.maximum_exponent, maximum_exponent_valid_d, maximum_exponent_valid_q)
 
   `AUTEUR_PIPE(maximum_exponent_overflow_pipe, get_exp_overflow_delay(PipeCfg), logic, maximum_exponent_overflow_d, maximum_exponent_overflow_q, maximum_exponent_valid_d)
@@ -517,7 +588,7 @@ module auteur_dotp
   `AUTEUR_FIFO(y_fifo_max_exp, get_max_exp_delay(PipeCfg)-YDelay, logic [OutSuperFmtExpBits-1:0], y_i.exponent, y_exp_q, y_valid_i, maximum_exponent_valid_q)
 
 
-  logic [OutSuperFmtExpBits-1:0] in_scale_prod_exp_norm_shift_d, in_scale_prod_exp_norm_shift_q;
+  logic [OutSuperFmtExpBits-1:0] max_exp_final_shifts_d, max_exp_final_shifts_q;
 
   logic [OutSuperFmtExpBits-1:0] y_shift_wide;
   logic [OutSuperFmtExpBits-1:0] in_shift_wide;
@@ -525,13 +596,14 @@ module auteur_dotp
   logic [ShiftAmountWidth-1:0]   y_shift_d, y_shift_q;
   logic [ShiftAmountWidth-1:0]   in_shift;
 
-  assign in_scale_prod_exp_norm_shift_d = in_scale_prod_exp_norm_q;
+  assign max_exp_final_shifts_d = absolute_max_exp_q;
 
-  assign y_shift_wide  = in_scale_prod_exp_norm_shift_d >  y_exp_q ? in_scale_prod_exp_norm_shift_d - y_exp_q : 0;
-  assign in_shift_wide = in_scale_prod_exp_norm_shift_d <= y_exp_q ? y_exp_q - in_scale_prod_exp_norm_shift_d : 0;
+  assign y_shift_wide           = max_exp_final_shifts_d >  y_exp_q ? max_exp_final_shifts_d - y_exp_q : 0;
 
-  assign y_shift_d  = (y_shift_wide  >> ShiftAmountWidth) != 0 ? '1 : y_shift_wide[ShiftAmountWidth-1:0];
-  assign in_shift = (in_shift_wide >> ShiftAmountWidth) != 0 ? '1 : in_shift_wide[ShiftAmountWidth-1:0];
+  assign in_shift_wide          = max_exp_final_shifts_d <= y_exp_q ? y_exp_q - max_exp_final_shifts_d : 0;
+  assign in_shift               = (in_shift_wide >> ShiftAmountWidth) != 0 ? '1 : in_shift_wide[ShiftAmountWidth-1:0];
+
+  assign y_shift_d              = (y_shift_wide  >> ShiftAmountWidth) != 0 ? '1 : y_shift_wide[ShiftAmountWidth-1:0];
 
 
   logic [NrIn-1:0][ShiftAmountWidth-1:0] in_shifts_norm;
@@ -564,21 +636,21 @@ module auteur_dotp
   logic                                  in_shifts_final_valid_d, in_shifts_final_valid_q;
 
   for (genvar i = 0; i < NrIn; i++) begin : assign_final_input_shifts
-    logic                        overflow;
+    logic [1:0]                  overflow;
     logic                        overflow_adj;
     logic [ShiftAmountWidth-1:0] local_shift;
     logic [ShiftAmountWidth-1:0] local_shift_adj;
 
-    assign {overflow,local_shift}          = in_shift + in_shifts_norm[i];
+    assign {overflow,local_shift}          = in_shift + in_shifts_norm[i] + scale_shift_adj_q[i/MxGroupSize];
     assign {overflow_adj, local_shift_adj} = local_shift + ((MaxInWidth - i - 1) % (1<<cfg_i.num_joins)) * ((InSuperFmtManBits+InManUnnorm) * 2); // Adjust the local shift if it is part of a larger mantissa
-    assign in_shifts_final_d[i]            = overflow || overflow_adj ? '1 : local_shift_adj;
+    assign in_shifts_final_d[i]            = |overflow || overflow_adj ? '1 : local_shift_adj;
   end
 
   assign in_shifts_final_valid_d = maximum_exponent_valid_q;
 
-  `AUTEUR_PIPE(y_shift_pipe                     , PipeCfg.input_path.exponent_path.final_shifts, logic [ShiftAmountWidth-1:0]          , y_shift_d                     , y_shift_q                     , in_shifts_final_valid_d)
-  `AUTEUR_PIPE(in_scale_prod_exp_norm_shift_pipe, PipeCfg.input_path.exponent_path.final_shifts, logic [OutSuperFmtExpBits-1:0]        , in_scale_prod_exp_norm_shift_d, in_scale_prod_exp_norm_shift_q, in_shifts_final_valid_d)
-  `AUTEUR_PIPE(in_shifts_final_pipe             , PipeCfg.input_path.exponent_path.final_shifts, logic [NrIn-1:0][ShiftAmountWidth-1:0], in_shifts_final_d             , in_shifts_final_q             , in_shifts_final_valid_d)
+  `AUTEUR_PIPE(y_shift_pipe             , PipeCfg.input_path.exponent_path.final_shifts, logic [ShiftAmountWidth-1:0]          , y_shift_d             , y_shift_q             , in_shifts_final_valid_d)
+  `AUTEUR_PIPE(max_exp_final_shifts_pipe, PipeCfg.input_path.exponent_path.final_shifts, logic [OutSuperFmtExpBits-1:0]        , max_exp_final_shifts_d, max_exp_final_shifts_q, in_shifts_final_valid_d)
+  `AUTEUR_PIPE(in_shifts_final_pipe     , PipeCfg.input_path.exponent_path.final_shifts, logic [NrIn-1:0][ShiftAmountWidth-1:0], in_shifts_final_d     , in_shifts_final_q     , in_shifts_final_valid_d)
   `AUTEUR_PIPE_VALID(final_shift_pipe_valid, PipeCfg.input_path.exponent_path.final_shifts, in_shifts_final_valid_d, in_shifts_final_valid_q)  // Do we need this? We should be synchronized with the mantissa path at this point...
 
 
@@ -588,8 +660,8 @@ module auteur_dotp
   logic                                                              scale_in_prod_valid_d, scale_in_prod_valid_q;
 
   for (genvar i = 0; i < NrIn; i++) begin : gen_scale_input_products
-    assign scale_in_prod_mant_d[i] = {in_prod_mant_carry[i],in_prod_mant_no_carry[i]}*scale_prod_mant_q;
-    assign scale_in_prod_sign_d[i] = in_prod_sign[i] ^ scale_prod_sign_q;
+    assign scale_in_prod_mant_d[i] = {in_prod_mant_carry[i],in_prod_mant_no_carry[i]}*scale_prod_mant_q[i/MxGroupSize];
+    assign scale_in_prod_sign_d[i] = in_prod_sign[i] ^ scale_prod_sign_q[i/MxGroupSize];
   end
 
   assign scale_in_prod_valid_d = prod_mant_valid_q;
@@ -627,7 +699,7 @@ module auteur_dotp
     end
   end
 
-  assign exp_acc_d = in_scale_prod_exp_norm_shift_q >= y_exp_acc_q ? in_scale_prod_exp_norm_shift_q : y_exp_acc_q;
+  assign exp_acc_d = max_exp_final_shifts_q >= y_exp_acc_q ? max_exp_final_shifts_q : y_exp_acc_q;
 
   assign acc_valid_d = scale_in_prod_valid_q;
 

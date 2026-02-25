@@ -90,4 +90,16 @@ package auteur_pkg;
   function automatic int unsigned get_exp_mant_input_margin(input dotp_pipe_cfg_t cfg);
     return get_input_mant_delay(cfg) - get_input_exp_delay(cfg);
   endfunction
+
+  function automatic int unsigned get_max_join_width(input int unsigned i, input int unsigned max_width);
+    int unsigned res   = 1;
+    int unsigned width = 2;
+
+    while ((i+1) % width == 0 && width <= max_width) begin
+      res   = res << 1;
+      width = width << 1;
+    end
+
+    return res;
+  endfunction
 endpackage

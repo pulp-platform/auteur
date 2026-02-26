@@ -533,7 +533,7 @@ module auteur_dotp
     always_comb begin : assign_group_max_in_prod_exps_norm_wide
       max_in_prod_exps_norm_wide[g] = '0;
 
-      for (int unsigned e = 0; e < 1<<cfg_i.num_joins; e++) begin
+      for (int unsigned e = 0; e < 1<<cfg_i.num_joins && e < MaxInWidth; e++) begin
         max_in_prod_exps_norm_wide[g][e*InSuperFmtExpBits+:InSuperFmtExpBits] = max_in_prod_exps[g][e][InSuperFmtExpBits-1:0];
         max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits-:1]        = max_in_prod_exps[g][e][InSuperFmtExpBits-:1];
       end
@@ -628,7 +628,7 @@ module auteur_dotp
       shift_wide = '0;
 
       // Here we get rid of all the surplus carry bits if joining inputs
-      for (int unsigned e = 0; e < fmt_width; e++) begin
+      for (int unsigned e = 0; e < fmt_width && e < MaxInWidth; e++) begin
         shift_wide[e*InSuperFmtExpBits+:InSuperFmtExpBits+1] = in_shifts_wrt_in_q[i>>NrMaxJoins][e+fmt_start];
       end
     end

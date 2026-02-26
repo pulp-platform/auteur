@@ -533,12 +533,22 @@ module auteur_dotp
     always_comb begin : assign_group_max_in_prod_exps_norm_wide
       max_in_prod_exps_norm_wide[g] = '0;
 
-      for (int unsigned e = 0; e < 1<<cfg_i.num_joins && e < MaxInWidth; e++) begin
+      for (int unsigned e = 0; e < MaxInWidth; e++) begin
+        // Actual (nonconstant) loop bound, put inside the body of the loop to avoid synthesis problems
+        if (e >= 1<<cfg_i.num_joins) begin
+          break;
+        end
+
         max_in_prod_exps_norm_wide[g][e*InSuperFmtExpBits+:InSuperFmtExpBits] = max_in_prod_exps[g][e][InSuperFmtExpBits-1:0];
         max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits-:1]        = max_in_prod_exps[g][e][InSuperFmtExpBits-:1];
       end
 
-      for (int unsigned i = (1<<cfg_i.num_joins)*InSuperFmtExpBits; i < MaxInWidth*InSuperFmtExpBits; i++) begin
+      for (int unsigned i = MaxInWidth*InSuperFmtExpBits-1; i >= InSuperFmtExpBits; i--) begin
+        // Actual (nonconstant) loop bound, just like the other one
+        if (i < (1<<cfg_i.num_joins)*InSuperFmtExpBits) begin
+          break;
+        end
+
         max_in_prod_exps_norm_wide[g][i] = ~max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits];
       end
     end
@@ -628,7 +638,11 @@ module auteur_dotp
       shift_wide = '0;
 
       // Here we get rid of all the surplus carry bits if joining inputs
-      for (int unsigned e = 0; e < fmt_width && e < MaxInWidth; e++) begin
+      for (int unsigned e = 0; e < MaxInWidth; e++) begin
+        if (e >= fmt_width) begin
+          break;
+        end
+
         shift_wide[e*InSuperFmtExpBits+:InSuperFmtExpBits+1] = in_shifts_wrt_in_q[i>>NrMaxJoins][e+fmt_start];
       end
     end

@@ -444,7 +444,7 @@ module auteur_dotp
 
     // The max tree is generated wrt the largest supported input format
     for (genvar s = 0; s < $clog2(MxGroupSizeMax); s++) begin : gen_max_tree
-      for (genvar n = 0; n < NrIn>>(NrMaxJoins+s); n+=2) begin : gen_nodes
+      for (genvar n = 0; n < MxGroupSize>>(NrMaxJoins+s); n+=2) begin : gen_nodes
         logic [MaxInWidth-1:0][1:0] comp_carry_out;
 
         for (genvar c = 0; c < MaxInWidth; c++) begin : gen_comparators

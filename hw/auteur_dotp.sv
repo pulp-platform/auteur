@@ -153,7 +153,11 @@ module auteur_dotp
       x_is_denormal_mant = 1'b1;
       w_is_denormal_mant = 1'b1;
 
-      for (int unsigned e = 0; e < (1<<cfg_i.num_joins) && e < IterBoundMant; e++) begin
+      for (int unsigned e = 0; e < IterBoundMant; e++) begin
+        if (e >= (1<<cfg_i.num_joins)) begin
+          break;
+        end
+
         if (|x_exp_denorm_check_q[i-e]) begin
           x_is_denormal_mant = 1'b0;
         end
@@ -168,7 +172,11 @@ module auteur_dotp
       x_is_denormal_exp = 1'b1;
       w_is_denormal_exp = 1'b1;
 
-      for (int unsigned e = 0; e < (1<<cfg_i.num_joins) && e < IterBoundExp; e++) begin
+      for (int unsigned e = 0; e < IterBoundExp; e++) begin
+        if (e >= (1<<cfg_i.num_joins)) begin
+          break;
+        end
+
         if (|x_exp_q[i+e]) begin
           x_is_denormal_exp = 1'b0;
         end
@@ -639,6 +647,7 @@ module auteur_dotp
 
       // Here we get rid of all the surplus carry bits if joining inputs
       for (int unsigned e = 0; e < MaxInWidth; e++) begin
+        // Another nonconstant bound
         if (e >= fmt_width) begin
           break;
         end

@@ -6,7 +6,6 @@
  * A multiprecision dot product unit with support for MX formats.
  *
  * IMPORTANT:
- *  - The unit does NOT support denormals: it will flush any denormal, be it input or output, regardless of the chosen format
  *  - The accumulation is LOSSY
  *  - NaNs are treated as infinities
  *  - Infinity times zero is zero
@@ -451,8 +450,15 @@ module auteur_dotp
         for (genvar c = 0; c < MaxInWidth; c++) begin : gen_comparators
           logic [1:0] comp_carry_in;
 
-          assign comp_carry_in[0] = (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][0];
-          assign comp_carry_in[1] = (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][1];
+          // Do not even consider the carry in if this is the last comparator.
+          // Without this, the synthesis tool reports a out of bounds index (even though this can't actually happen!).
+          if (c != MaxInWidth-1) begin
+            assign comp_carry_in[0] = (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][0];
+            assign comp_carry_in[1] = (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][1];
+          end else begin
+            assign comp_carry_in[0] = 1'b0;
+            assign comp_carry_in[1] = 1'b0;
+          end
 
           assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} >= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};
           assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} <  {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};

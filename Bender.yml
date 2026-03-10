@@ -16,3 +16,7 @@ sources:
     - hw/auteur_pkg.sv
     - hw/auteur_dotp.sv
     - hw/auteur_fifo.sv
+    - hw/auteur_ce.sv
+    - hw/auteur_packer.sv
+    - hw/auteur_unpacker.sv
+

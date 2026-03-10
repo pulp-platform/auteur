@@ -4,6 +4,15 @@
 
 package auteur_pkg;
   typedef struct {
+    bit          is_signed;
+    int unsigned mantissa_bits;
+    int unsigned exponent_bits;
+    bit          has_infinity;
+    bit          has_nan;
+    int unsigned required_joins;
+  } fp_encoding_t;
+
+  typedef struct {
     struct {
       struct {
         int unsigned inputs;
@@ -34,6 +43,13 @@ package auteur_pkg;
     int unsigned accumulation;
     int unsigned normalization;
   } dotp_pipe_cfg_t;
+
+  typedef struct packed {
+    logic is_denormal;
+    logic is_zero;
+    logic is_infinity;
+    logic is_nan;
+  } fp_flags_t;
 
   function automatic int unsigned get_input_mant_delay(input dotp_pipe_cfg_t cfg);
     int unsigned delay = 0;
@@ -77,6 +93,16 @@ package auteur_pkg;
     return delay;
   endfunction
 
+  function automatic int unsigned get_total_delay(input dotp_pipe_cfg_t cfg);
+    int unsigned delay = 0;
+
+    delay += get_input_mant_delay(cfg);
+    delay += cfg.accumulation;
+    delay += cfg.normalization;
+
+    return delay;
+  endfunction
+
   function automatic int unsigned get_mant_scales_inputs_margin(input dotp_pipe_cfg_t cfg);
     return cfg.input_path.mantissa_path.inputs + cfg.input_path.mantissa_path.input_products
          - cfg.scale_path.mantissa_path.inputs - cfg.scale_path.mantissa_path.scale_product;
@@ -89,6 +115,29 @@ package auteur_pkg;
 
   function automatic int unsigned get_exp_mant_input_margin(input dotp_pipe_cfg_t cfg);
     return get_input_mant_delay(cfg) - get_input_exp_delay(cfg);
+  endfunction
+
+  function automatic int unsigned get_input_flags_delay(input dotp_pipe_cfg_t cfg);
+    int unsigned delay = 0;
+
+    delay += get_total_delay(cfg);
+    delay -= cfg.input_path.mantissa_path.inputs;
+    delay -= cfg.accumulation;
+    delay -= cfg.normalization;
+
+    return delay;
+  endfunction
+
+  function automatic int unsigned get_scale_flags_delay(input dotp_pipe_cfg_t cfg);
+    int unsigned delay = 0;
+
+    delay += get_total_delay(cfg);
+    delay -= get_mant_scales_inputs_margin(cfg);
+    delay -= cfg.scale_path.mantissa_path.inputs;
+    delay -= cfg.accumulation;
+    delay -= cfg.normalization;
+
+    return delay;
   endfunction
 
   function automatic int unsigned get_max_join_width(input int unsigned i, input int unsigned max_width);

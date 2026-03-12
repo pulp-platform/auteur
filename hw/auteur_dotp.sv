@@ -24,6 +24,9 @@ module auteur_dotp
   parameter int unsigned    YDelay = 0,
   parameter int unsigned    ScalesDelay = 0,
   parameter dotp_pipe_cfg_t PipeCfg = '{default: '0},
+  // Specifies whether FIFOs should be used to synchronize the various branches.
+  // Only use this option if the number of pipeline stages is very high and the paths are significantly unbalanced.
+  parameter bit             SyncWithFifos = 0,
 
   localparam int unsigned   NrMxScales = NrIn/MxGroupSize,
 
@@ -310,9 +313,13 @@ module auteur_dotp
 
   `AUTEUR_PIPE_VALID(in_valid_exps_pipe, get_exp_mant_input_margin(PipeCfg), prod_exp_valid_fifo_d, prod_exp_valid_fifo_q)
 
-  `AUTEUR_FIFO(prod_exp_no_carry_fifo, get_exp_mant_input_margin(PipeCfg), logic [NrIn-1:0][InSuperFmtExpBits-1:0], prod_exp_no_carry_fifo_d, prod_exp_no_carry_fifo_q, prod_exp_valid_fifo_d, prod_exp_valid_fifo_q)
-  `AUTEUR_FIFO(prod_exp_carry_fifo   , get_exp_mant_input_margin(PipeCfg), logic [NrIn-1:0]                       , prod_exp_carry_fifo_d   , prod_exp_carry_fifo_q   , prod_exp_valid_fifo_d, prod_exp_valid_fifo_q)
-
+  if (SyncWithFifos) begin
+    `AUTEUR_FIFO(prod_exp_no_carry_fifo, get_exp_mant_input_margin(PipeCfg), logic [NrIn-1:0][InSuperFmtExpBits-1:0], prod_exp_no_carry_fifo_d, prod_exp_no_carry_fifo_q, prod_exp_valid_fifo_d, prod_exp_valid_fifo_q)
+    `AUTEUR_FIFO(prod_exp_carry_fifo   , get_exp_mant_input_margin(PipeCfg), logic [NrIn-1:0]                       , prod_exp_carry_fifo_d   , prod_exp_carry_fifo_q   , prod_exp_valid_fifo_d, prod_exp_valid_fifo_q)
+  end else begin
+    `AUTEUR_PIPE(prod_exp_no_carry_fifo, get_exp_mant_input_margin(PipeCfg), logic [NrIn-1:0][InSuperFmtExpBits-1:0], prod_exp_no_carry_fifo_d, prod_exp_no_carry_fifo_q, prod_exp_valid_fifo_d)
+    `AUTEUR_PIPE(prod_exp_carry_fifo   , get_exp_mant_input_margin(PipeCfg), logic [NrIn-1:0]                       , prod_exp_carry_fifo_d   , prod_exp_carry_fifo_q   , prod_exp_valid_fifo_d)
+  end
 
   logic [NrMxGroups-1:0]                             x_scale_sign_fifo_d, w_scale_sign_fifo_d, x_scale_sign_fifo_q, w_scale_sign_fifo_q;
   logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0] x_scale_exp_fifo_d, w_scale_exp_fifo_d, x_scale_exp_fifo_q, w_scale_exp_fifo_q;
@@ -339,16 +346,29 @@ module auteur_dotp
   `AUTEUR_PIPE_VALID(in_valid_mant_scales_fifo_pipe, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, in_valid_i, in_valid_mant_scales_fifo)
   `AUTEUR_PIPE_VALID(in_valid_exp_scales_fifo_pipe , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, in_valid_i, in_valid_exp_scales_fifo )
 
-  `AUTEUR_FIFO(x_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0]                            , x_scale_sign_fifo_d , x_scale_sign_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
-  `AUTEUR_FIFO(x_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_d  , x_scale_exp_fifo_q  , scale_valid_i, in_valid_exp_scales_fifo )
-  `AUTEUR_FIFO(x_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0], x_scale_mant_fifo_d , x_scale_mant_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
-  `AUTEUR_FIFO(x_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrMxGroups-1:0]                       , x_scale_flags_fifo_d, x_scale_flags_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
+  if (SyncWithFifos) begin
+    `AUTEUR_FIFO(x_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0]                            , x_scale_sign_fifo_d , x_scale_sign_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
+    `AUTEUR_FIFO(x_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_d  , x_scale_exp_fifo_q  , scale_valid_i, in_valid_exp_scales_fifo )
+    `AUTEUR_FIFO(x_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0], x_scale_mant_fifo_d , x_scale_mant_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
+    `AUTEUR_FIFO(x_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrMxGroups-1:0]                       , x_scale_flags_fifo_d, x_scale_flags_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
+  end else begin
+    `AUTEUR_PIPE(x_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0]                            , x_scale_sign_fifo_d , x_scale_sign_fifo_q , scale_valid_i)
+    `AUTEUR_PIPE(x_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_d  , x_scale_exp_fifo_q  , scale_valid_i)
+    `AUTEUR_PIPE(x_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0], x_scale_mant_fifo_d , x_scale_mant_fifo_q , scale_valid_i)
+    `AUTEUR_PIPE(x_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrMxGroups-1:0]                       , x_scale_flags_fifo_d, x_scale_flags_fifo_q, scale_valid_i)
+  end
 
-  `AUTEUR_FIFO(w_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0]                            , w_scale_sign_fifo_d , w_scale_sign_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
-  `AUTEUR_FIFO(w_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], w_scale_exp_fifo_d  , w_scale_exp_fifo_q  , scale_valid_i, in_valid_exp_scales_fifo )
-  `AUTEUR_FIFO(w_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0], w_scale_mant_fifo_d , w_scale_mant_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
-  `AUTEUR_FIFO(w_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrMxGroups-1:0]                       , w_scale_flags_fifo_d, w_scale_flags_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
-
+  if (SyncWithFifos) begin
+    `AUTEUR_FIFO(w_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0]                            , w_scale_sign_fifo_d , w_scale_sign_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
+    `AUTEUR_FIFO(w_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], w_scale_exp_fifo_d  , w_scale_exp_fifo_q  , scale_valid_i, in_valid_exp_scales_fifo )
+    `AUTEUR_FIFO(w_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0], w_scale_mant_fifo_d , w_scale_mant_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
+    `AUTEUR_FIFO(w_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrMxGroups-1:0]                       , w_scale_flags_fifo_d, w_scale_flags_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
+  end else begin
+    `AUTEUR_PIPE(w_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0]                            , w_scale_sign_fifo_d , w_scale_sign_fifo_q , scale_valid_i)
+    `AUTEUR_PIPE(w_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], w_scale_exp_fifo_d  , w_scale_exp_fifo_q  , scale_valid_i)
+    `AUTEUR_PIPE(w_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0], w_scale_mant_fifo_d , w_scale_mant_fifo_q , scale_valid_i)
+    `AUTEUR_PIPE(w_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrMxGroups-1:0]                       , w_scale_flags_fifo_d, w_scale_flags_fifo_q, scale_valid_i)
+  end
 
   //Movable registers for the scales
   logic [NrMxScales-1:0]                             x_scale_sign_q, w_scale_sign_q;
@@ -624,8 +644,11 @@ module auteur_dotp
 
 
   logic [OutSuperFmtExpBits-1:0] y_exp_q;
-  `AUTEUR_FIFO(y_fifo_max_exp, get_max_exp_delay(PipeCfg)-YDelay, logic [OutSuperFmtExpBits-1:0], y_i.exponent, y_exp_q, y_valid_i, maximum_exponent_valid_q)
-
+  if (SyncWithFifos) begin
+    `AUTEUR_FIFO(y_fifo_max_exp, get_max_exp_delay(PipeCfg)-YDelay, logic [OutSuperFmtExpBits-1:0], y_i.exponent, y_exp_q, y_valid_i, maximum_exponent_valid_q)
+  end else begin
+    `AUTEUR_PIPE(y_fifo_max_exp, get_max_exp_delay(PipeCfg)-YDelay, logic [OutSuperFmtExpBits-1:0], y_i.exponent, y_exp_q, y_valid_i)
+  end
 
   logic [OutSuperFmtExpBits-1:0] max_exp_final_shifts_d, max_exp_final_shifts_q;
 
@@ -723,11 +746,17 @@ module auteur_dotp
 
   fp_flags_t y_flags_q;
 
-  `AUTEUR_FIFO(y_sign_fifo_acc, get_input_mant_delay(PipeCfg)-YDelay                    , logic                         , y_i.sign    , y_sign_acc_q, y_valid_i               , scale_in_prod_valid_q)
-  `AUTEUR_FIFO(y_exp_fifo_acc , get_input_mant_delay(PipeCfg)-get_max_exp_delay(PipeCfg), logic [OutSuperFmtExpBits-1:0], y_i.exponent, y_exp_acc_q , maximum_exponent_valid_q, scale_in_prod_valid_q)
-  `AUTEUR_FIFO(y_mant_fifo_acc, get_input_mant_delay(PipeCfg)-YDelay                    , logic [OutSuperFmtManBits-1:0], y_i.mantissa, y_mant_acc_q, y_valid_i               , scale_in_prod_valid_q)
-  `AUTEUR_FIFO(y_flags_fifo   , get_input_mant_delay(PipeCfg)-YDelay                    , fp_flags_t                    , y_flags_i   , y_flags_q   , y_valid_i               , scale_in_prod_valid_q)
-
+  if (SyncWithFifos) begin
+    `AUTEUR_FIFO(y_sign_fifo_acc, get_input_mant_delay(PipeCfg)-YDelay                    , logic                         , y_i.sign    , y_sign_acc_q, y_valid_i               , scale_in_prod_valid_q)
+    `AUTEUR_FIFO(y_exp_fifo_acc , get_input_mant_delay(PipeCfg)-get_max_exp_delay(PipeCfg), logic [OutSuperFmtExpBits-1:0], y_i.exponent, y_exp_acc_q , maximum_exponent_valid_q, scale_in_prod_valid_q)
+    `AUTEUR_FIFO(y_mant_fifo_acc, get_input_mant_delay(PipeCfg)-YDelay                    , logic [OutSuperFmtManBits-1:0], y_i.mantissa, y_mant_acc_q, y_valid_i               , scale_in_prod_valid_q)
+    `AUTEUR_FIFO(y_flags_fifo   , get_input_mant_delay(PipeCfg)-YDelay                    , fp_flags_t                    , y_flags_i   , y_flags_q   , y_valid_i               , scale_in_prod_valid_q)
+  end else begin
+    `AUTEUR_PIPE(y_sign_fifo_acc, get_input_mant_delay(PipeCfg)-YDelay                    , logic                         , y_i.sign    , y_sign_acc_q, y_valid_i               )
+    `AUTEUR_PIPE(y_exp_fifo_acc , get_input_mant_delay(PipeCfg)-get_max_exp_delay(PipeCfg), logic [OutSuperFmtExpBits-1:0], y_i.exponent, y_exp_acc_q , maximum_exponent_valid_q)
+    `AUTEUR_PIPE(y_mant_fifo_acc, get_input_mant_delay(PipeCfg)-YDelay                    , logic [OutSuperFmtManBits-1:0], y_i.mantissa, y_mant_acc_q, y_valid_i               )
+    `AUTEUR_PIPE(y_flags_fifo   , get_input_mant_delay(PipeCfg)-YDelay                    , fp_flags_t                    , y_flags_i   , y_flags_q   , y_valid_i               )
+  end
 
   // FINAL ACCUMULATION
 

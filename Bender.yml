@@ -19,4 +19,6 @@ sources:
     - hw/auteur_ce.sv
     - hw/auteur_packer.sv
     - hw/auteur_unpacker.sv
+    - hw/auteur_output_buffer.sv
+    - hw/auteur_group.sv
 

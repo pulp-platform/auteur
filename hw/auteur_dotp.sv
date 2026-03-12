@@ -217,10 +217,10 @@ module auteur_dotp
           x_cat_h[InSuperFmtManBits*JoinWidth] = ((c+2)*JoinWidth)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
           w_cat_h[InSuperFmtManBits*JoinWidth] = ((c+2)*JoinWidth)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
         end else begin
-          x_cat_l = x_mant_q[c*JoinWidth];
-          w_cat_l = w_mant_q[c*JoinWidth];
-          x_cat_h = x_mant_q[(c+1)*JoinWidth];
-          w_cat_h = w_mant_q[(c+1)*JoinWidth];
+          x_cat_l = x_mant_q[(c+1)*JoinWidth-1:c*JoinWidth];
+          w_cat_l = w_mant_q[(c+1)*JoinWidth-1:c*JoinWidth];
+          x_cat_h = x_mant_q[(c+2)*JoinWidth-1:(c+1)*JoinWidth];
+          w_cat_h = w_mant_q[(c+2)*JoinWidth-1:(c+1)*JoinWidth];
         end
       end
 
@@ -741,10 +741,10 @@ module auteur_dotp
   typedef logic [2*InSuperFmtManBits+2*MxScaleSuperFmtManBits+3:0] scale_in_prod_mant_t;
 
   always_comb begin : sum_mantissae
-    mant_acc_d = signed'({y_sign_acc_q,y_mant_denorm_t'(y_sign_acc_q ? {y_flags_q.is_denormal,~y_mant_acc_q}+1 : {~y_flags_q.is_denormal,y_mant_acc_q}),{(AccRoundBits){1'b0}}}) >>> y_shift_q;
+    mant_acc_d = signed'({y_sign_acc_q ? {y_flags_q.is_denormal,~y_mant_acc_q}+1'b1 : {1'b0,~y_flags_q.is_denormal,y_mant_acc_q},{(AccRoundBits){1'b0}}}) >>> y_shift_q;
 
     for (int unsigned i = 0; i < NrIn; i++) begin
-      scale_in_prod_mant_signed[i] =  signed'({scale_in_prod_sign_q[i],scale_in_prod_mant_t'(scale_in_prod_sign_q[i] ? ~scale_in_prod_mant_q[i]+1 : scale_in_prod_mant_q[i]),{(MantAccFracWidth-2*InSuperFmtManBits-2*MxScaleSuperFmtManBits){1'b0}}});
+      scale_in_prod_mant_signed[i] =  signed'({scale_in_prod_sign_q[i] ? ~scale_in_prod_mant_q[i]+1'b1 : {1'b0,scale_in_prod_mant_q[i]},{(MantAccFracWidth-2*InSuperFmtManBits-2*MxScaleSuperFmtManBits){1'b0}}});
       mant_acc_d                   += signed'(scale_in_prod_mant_signed[i]) >>> in_shifts_final_q[i];
     end
   end

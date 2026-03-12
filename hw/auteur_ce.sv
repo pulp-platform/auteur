@@ -10,7 +10,6 @@ module auteur_ce
   parameter int unsigned    BaseInFmtWidth = 1,
   parameter int unsigned    ScaleFmtWidth = 1,
   parameter int unsigned    OutFmtWidth = 1,
-  parameter int unsigned    OutputBufferSize = 1,
   parameter int unsigned    NrIn = 1,
   parameter int unsigned    NrMaxJoins = 1,
   parameter int unsigned    MxGroupSize = NrIn,

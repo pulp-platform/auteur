@@ -221,11 +221,9 @@ module auteur_group
       end
     end
 
-    assign group_rsp_o[w] = '{
-      valid: rsp_valid,
-      ready: rsp_ready,
-      rdata: rsp_rdata
-    };
+    assign group_rsp_o[w].valid = rsp_valid;
+    assign group_rsp_o[w].ready = rsp_ready;
+    assign group_rsp_o[w].rdata = rsp_rdata;
   end
 
 endmodule

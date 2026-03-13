@@ -148,7 +148,7 @@ module auteur_dotp
     if (cfg_i.num_joins <= NrMaxJoins) begin
       for (int unsigned g = 0; g < NrMxGroups; g++) begin
         for (int unsigned i = 0; i < MxGroupSize; i++) begin
-          if (i % 1<<cfg_i.num_joins == 0) begin
+          if (i % (1<<cfg_i.num_joins) == 0) begin
             in_is_infinity_d[g] |= x_flags_q[g*MxGroupSize+i].is_infinity | w_flags_q[g*MxGroupSize+i].is_infinity;
             in_is_nan_d[g]      |= x_flags_q[g*MxGroupSize+i].is_nan | w_flags_q[g*MxGroupSize+i].is_nan | (x_flags_q[g*MxGroupSize+i].is_infinity & w_flags_q[g*MxGroupSize+i].is_zero) | (w_flags_q[g*MxGroupSize+i].is_infinity & x_flags_q[g*MxGroupSize+i].is_zero);
 
@@ -605,7 +605,7 @@ module auteur_dotp
     end
 
     if (MxScaleSuperFmtExpBits < OutSuperFmtExpBits) begin
-      assign scale_prod_exp_pad[g] = {scale_prod_exp_q[g][MxScaleSuperFmtExpBits-:2],{(OutSuperFmtManBits-MxScaleSuperFmtExpBits){1'b0}},scale_prod_exp_q[g][MxScaleSuperFmtExpBits-2:0]};
+      assign scale_prod_exp_pad[g] = {scale_prod_exp_q[g][MxScaleSuperFmtExpBits-:2],{(OutSuperFmtExpBits-MxScaleSuperFmtExpBits){1'b0}},scale_prod_exp_q[g][MxScaleSuperFmtExpBits-2:0]};
     end else begin
       assign scale_prod_exp_pad[g] = scale_prod_exp_q[g][MxScaleSuperFmtExpBits-:OutSuperFmtExpBits+1];
     end

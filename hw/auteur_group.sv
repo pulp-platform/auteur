@@ -209,14 +209,12 @@ module auteur_group
       end
 
       for (int unsigned x = 0; x < GroupSizeX; x+=IntercoWidth) begin
-        rsp_valid |= buf_rsp_ext[x].valid;
+        if (~rsp_valid) begin
+          rsp_valid |= buf_rsp_ext[x].valid;
 
-        for (int unsigned i = 0; i < IntercoWidth; i++) begin
-          rsp_rdata[OutFmtWidth*i+:OutFmtWidth] = buf_rsp_ext[x+i].rdata;
-        end
-
-        if (rsp_valid) begin
-          break;
+          for (int unsigned i = 0; i < IntercoWidth; i++) begin
+            rsp_rdata[OutFmtWidth*i+:OutFmtWidth] = buf_rsp_ext[x+i].rdata;
+          end
         end
       end
     end

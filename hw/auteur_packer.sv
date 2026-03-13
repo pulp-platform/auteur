@@ -51,21 +51,21 @@ module auteur_packer
                            in_exp_is_zero,
                            in_exp_is_one;
 
-    fmt_has_infinity  = InFpEncoding[in_fmt_i].has_infinity;
-    fmt_has_nan       = InFpEncoding[in_fmt_i].has_nan;
-    fmt_has_denormals = InFpEncoding[in_fmt_i].has_denormals;
+    assign fmt_has_infinity  = InFpEncoding[in_fmt_i].has_infinity;
+    assign fmt_has_nan       = InFpEncoding[in_fmt_i].has_nan;
+    assign fmt_has_denormals = InFpEncoding[in_fmt_i].has_denormals;
 
-    fmt_joins      = InFpEncoding[in_fmt_i].required_joins;
-    fmt_width      = 1<<fmt_joins;
-    fmt_mant_width = InFpEncoding[in_fmt_i].mantissa_bits;
-    fmt_exp_width  = InFpEncoding[in_fmt_i].exponent_bits;
-    fmt_is_signed  = InFpEncoding[in_fmt_i].is_signed;
-    fmt_tot_width  = fmt_mant_width + fmt_exp_width + fmt_is_signed;
+    assign fmt_joins      = InFpEncoding[in_fmt_i].required_joins;
+    assign fmt_width      = 1<<fmt_joins;
+    assign fmt_mant_width = InFpEncoding[in_fmt_i].mantissa_bits;
+    assign fmt_exp_width  = InFpEncoding[in_fmt_i].exponent_bits;
+    assign fmt_is_signed  = InFpEncoding[in_fmt_i].is_signed;
+    assign fmt_tot_width  = fmt_mant_width + fmt_exp_width + fmt_is_signed;
 
     for (genvar j = 0; j < MaxInWidth; j++) begin : gen_group_pack
       int unsigned element;
 
-      element = j >> fmt_joins;
+      assign element = j >> fmt_joins;
 
       always_comb begin : check_fmt
         in_mant_is_zero[j] = 1'b1;
@@ -151,8 +151,8 @@ module auteur_packer
         int unsigned super_fmt_exp_width;
         int unsigned position;
 
-        super_fmt_exp_width = fmt_width*OutFmtExpBits;
-        position            = (j % fmt_width)*(OutFmtExpBits) + e;
+        assign super_fmt_exp_width = fmt_width*OutFmtExpBits;
+        assign position            = (j % fmt_width)*(OutFmtExpBits) + e;
 
         always_comb begin : assign_bit
           out_exponents[j][e] = 1'b0;
@@ -179,7 +179,7 @@ module auteur_packer
       for (genvar m = 0; m < OutFmtManBits+OutManUnnorm; m++) begin : assign_mantissa_bits
         int unsigned distance;
 
-        distance = (fmt_width*(OutFmtManBits+OutManUnnorm)) - ((j % fmt_width)*(OutFmtManBits+OutManUnnorm) + m) - 1;
+        assign distance = (fmt_width*(OutFmtManBits+OutManUnnorm)) - ((j % fmt_width)*(OutFmtManBits+OutManUnnorm) + m) - 1;
 
         always_comb begin : assign_bit
           out_mantissae[j][m] = 1'b0;

@@ -29,14 +29,14 @@ module auteur_unpacker
 
   bit fmt_has_infinity, fmt_has_nan, fmt_has_denormals;
 
-  fmt_mant_width = OutFpEncoding[out_fmt_i].mantissa_bits;
-  fmt_exp_width  = OutFpEncoding[out_fmt_i].exponent_bits;
-  fmt_is_signed  = OutFpEncoding[out_fmt_i].is_signed;
-  fmt_tot_width  = fmt_mant_width + fmt_exp_width + fmt_is_signed;
+  assign fmt_mant_width = OutFpEncoding[out_fmt_i].mantissa_bits;
+  assign fmt_exp_width  = OutFpEncoding[out_fmt_i].exponent_bits;
+  assign fmt_is_signed  = OutFpEncoding[out_fmt_i].is_signed;
+  assign fmt_tot_width  = fmt_mant_width + fmt_exp_width + fmt_is_signed;
 
-  fmt_has_infinity  = OutFpEncoding[out_fmt_i].has_infinity;
-  fmt_has_nan       = OutFpEncoding[out_fmt_i].has_nan;
-  fmt_has_denormals = OutFpEncoding[out_fmt_i].has_denormals;
+  assign fmt_has_infinity  = OutFpEncoding[out_fmt_i].has_infinity;
+  assign fmt_has_nan       = OutFpEncoding[out_fmt_i].has_nan;
+  assign fmt_has_denormals = OutFpEncoding[out_fmt_i].has_denormals;
 
   logic is_nan, is_infinity, is_zero;
 

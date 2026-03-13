@@ -139,10 +139,11 @@ module auteur_dotp
                          in_prod_any_zero_d, in_prod_any_zero_q;
 
   always_comb begin : detect_input_exceptions
-    in_is_infinity_d              = '0;
-    in_is_nan_d                   = '0;
+    in_is_infinity_d                = '0;
+    in_is_nan_d                     = '0;
     in_prod_any_positive_infinity_d = '0;
     in_prod_any_negative_infinity_d = '0;
+    in_prod_any_zero_d              = '0;
 
     if (cfg_i.num_joins <= NrMaxJoins) begin
       for (int unsigned g = 0; g < NrMxGroups; g++) begin

@@ -35,16 +35,12 @@ module auteur_packer
                                            in_is_nan;
 
   for (genvar i = 0; i < NrInMaxWidth; i++) begin : gen_packers
-    let fmt_joins      = InFpEncoding[in_fmt_i].required_joins;
-    let fmt_width      = 1<<fmt_joins;
-    let fmt_mant_width = InFpEncoding[in_fmt_i].mantissa_bits;
-    let fmt_exp_width  = InFpEncoding[in_fmt_i].exponent_bits;
-    let fmt_is_signed  = InFpEncoding[in_fmt_i].is_signed;
-    let fmt_tot_width  = fmt_mant_width + fmt_exp_width + fmt_is_signed;
+    int unsigned fmt_joins, fmt_width;
+    int unsigned fmt_mant_width, fmt_exp_width;
+    bit          fmt_is_signed;
+    int unsigned fmt_tot_width;
 
-    let fmt_has_infinity  = InFpEncoding[in_fmt_i].has_infinity;
-    let fmt_has_nan       = InFpEncoding[in_fmt_i].has_nan;
-    let fmt_has_denormals = InFpEncoding[in_fmt_i].has_denormals;
+    bit fmt_has_infinity, fmt_has_nan, fmt_has_denormals;
 
     logic [MaxInWidth-1:0]                                 out_signs;
     logic [MaxInWidth-1:0][OutFmtExpBits-1:0]              out_exponents;
@@ -55,8 +51,21 @@ module auteur_packer
                            in_exp_is_zero,
                            in_exp_is_one;
 
+    fmt_has_infinity  = InFpEncoding[in_fmt_i].has_infinity;
+    fmt_has_nan       = InFpEncoding[in_fmt_i].has_nan;
+    fmt_has_denormals = InFpEncoding[in_fmt_i].has_denormals;
+
+    fmt_joins      = InFpEncoding[in_fmt_i].required_joins;
+    fmt_width      = 1<<fmt_joins;
+    fmt_mant_width = InFpEncoding[in_fmt_i].mantissa_bits;
+    fmt_exp_width  = InFpEncoding[in_fmt_i].exponent_bits;
+    fmt_is_signed  = InFpEncoding[in_fmt_i].is_signed;
+    fmt_tot_width  = fmt_mant_width + fmt_exp_width + fmt_is_signed;
+
     for (genvar j = 0; j < MaxInWidth; j++) begin : gen_group_pack
-      let element = j >> fmt_joins;
+      int unsigned element;
+
+      element = j >> fmt_joins;
 
       always_comb begin : check_fmt
         in_mant_is_zero[j] = 1'b1;
@@ -66,7 +75,9 @@ module auteur_packer
 
         if (in_fmt_i < NrFormats) begin
           for (int unsigned b = 0; b < BaseInFmtWidth; b++) begin
-            let position = b + (j % fmt_width)*BaseInFmtWidth;
+            int unsigned position;
+
+            position = b + (j % fmt_width)*BaseInFmtWidth
 
             // Is the bit an exponent bit?
             if (position >= fmt_mant_width && position < fmt_tot_width - fmt_is_signed) begin
@@ -137,8 +148,11 @@ module auteur_packer
       assign out_signs[j] = fmt_is_signed ? in_i[i][(j+1)*BaseInFmtWidth-1] : 1'b0;
 
       for (genvar e = 0; e < OutFmtExpBits; e++) begin : assign_exponent_bits
-        let super_fmt_exp_width = fmt_width*OutFmtExpBits;
-        let position            = (j % fmt_width)*(OutFmtExpBits) + e;
+        int unsigned super_fmt_exp_width;
+        int unsigned position;
+
+        super_fmt_exp_width = fmt_width*OutFmtExpBits;
+        position            = (j % fmt_width)*(OutFmtExpBits) + e;
 
         always_comb begin : assign_bit
           out_exponents[j][e] = 1'b0;
@@ -163,7 +177,9 @@ module auteur_packer
       end
 
       for (genvar m = 0; m < OutFmtManBits+OutManUnnorm; m++) begin : assign_mantissa_bits
-        let distance = (fmt_width*(OutFmtManBits+OutManUnnorm)) - ((j % fmt_width)*(OutFmtManBits+OutManUnnorm) + m) - 1;
+        int unsigned distance;
+
+        distance = (fmt_width*(OutFmtManBits+OutManUnnorm)) - ((j % fmt_width)*(OutFmtManBits+OutManUnnorm) + m) - 1;
 
         always_comb begin : assign_bit
           out_mantissae[j][m] = 1'b0;

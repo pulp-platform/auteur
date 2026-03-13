@@ -24,14 +24,19 @@ module auteur_unpacker
   input  logic [SelWidth-1:0]    out_fmt_i,
   output logic [OutFmtWidth-1:0] out_o
 );
-  let fmt_mant_width = OutFpEncoding[out_fmt_i].mantissa_bits;
-  let fmt_exp_width  = OutFpEncoding[out_fmt_i].exponent_bits;
-  let fmt_is_signed  = OutFpEncoding[out_fmt_i].is_signed;
-  let fmt_tot_width  = fmt_mant_width + fmt_exp_width + fmt_is_signed;
+  int unsigned fmt_mant_width, fmt_exp_width, fmt_tot_width;
+  bit          fmt_is_signed;
 
-  let fmt_has_infinity  = OutFpEncoding[out_fmt_i].has_infinity;
-  let fmt_has_nan       = OutFpEncoding[out_fmt_i].has_nan;
-  let fmt_has_denormals = OutFpEncoding[out_fmt_i].has_denormals;
+  bit fmt_has_infinity, fmt_has_nan, fmt_has_denormals;
+
+  fmt_mant_width = OutFpEncoding[out_fmt_i].mantissa_bits;
+  fmt_exp_width  = OutFpEncoding[out_fmt_i].exponent_bits;
+  fmt_is_signed  = OutFpEncoding[out_fmt_i].is_signed;
+  fmt_tot_width  = fmt_mant_width + fmt_exp_width + fmt_is_signed;
+
+  fmt_has_infinity  = OutFpEncoding[out_fmt_i].has_infinity;
+  fmt_has_nan       = OutFpEncoding[out_fmt_i].has_nan;
+  fmt_has_denormals = OutFpEncoding[out_fmt_i].has_denormals;
 
   logic is_nan, is_infinity, is_zero;
 

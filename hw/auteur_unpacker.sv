@@ -125,7 +125,7 @@ module auteur_unpacker
           end else begin
             if (b >= fmt_mant_width) begin
               out_o[b] = out_exp[b-fmt_mant_width];
-            end else begin
+            end else if (b < InFmtManBits) begin // Required check to avoid index out of range errors during synthesis
               out_o[b] = out_mant[b];
             end
           end

@@ -40,7 +40,7 @@ module auteur_packer
     bit          fmt_is_signed;
     int unsigned fmt_tot_width;
 
-    bit fmt_has_infinity, fmt_has_nan, fmt_has_denormals;
+    bit fmt_has_infinity, fmt_has_nan;
 
     logic [MaxInWidth-1:0]                                 out_signs;
     logic [MaxInWidth-1:0][OutFmtExpBits-1:0]              out_exponents;
@@ -53,7 +53,6 @@ module auteur_packer
 
     assign fmt_has_infinity  = InFpEncoding[in_fmt_i].has_infinity;
     assign fmt_has_nan       = InFpEncoding[in_fmt_i].has_nan;
-    assign fmt_has_denormals = InFpEncoding[in_fmt_i].has_denormals;
 
     assign fmt_joins      = InFpEncoding[in_fmt_i].required_joins;
     assign fmt_width      = 1<<fmt_joins;

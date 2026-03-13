@@ -27,7 +27,7 @@ module auteur_unpacker
   int unsigned fmt_mant_width, fmt_exp_width, fmt_tot_width;
   bit          fmt_is_signed;
 
-  bit fmt_has_infinity, fmt_has_nan, fmt_has_denormals;
+  bit fmt_has_infinity, fmt_has_nan;
 
   assign fmt_mant_width = OutFpEncoding[out_fmt_i].mantissa_bits;
   assign fmt_exp_width  = OutFpEncoding[out_fmt_i].exponent_bits;
@@ -36,7 +36,6 @@ module auteur_unpacker
 
   assign fmt_has_infinity  = OutFpEncoding[out_fmt_i].has_infinity;
   assign fmt_has_nan       = OutFpEncoding[out_fmt_i].has_nan;
-  assign fmt_has_denormals = OutFpEncoding[out_fmt_i].has_denormals;
 
   logic is_nan, is_infinity, is_zero;
 

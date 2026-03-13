@@ -77,7 +77,7 @@ module auteur_packer
           for (int unsigned b = 0; b < BaseInFmtWidth; b++) begin
             int unsigned position;
 
-            position = b + (j % fmt_width)*BaseInFmtWidth
+            position = b + (j % fmt_width)*BaseInFmtWidth;
 
             // Is the bit an exponent bit?
             if (position >= fmt_mant_width && position < fmt_tot_width - fmt_is_signed) begin

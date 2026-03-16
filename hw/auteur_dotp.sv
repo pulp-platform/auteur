@@ -413,7 +413,7 @@ module auteur_dotp
 
       scale_prod_any_positive_infinity_d[g] |= (x_scale_flags_q[g].is_infinity | w_scale_flags_q[g].is_infinity) & (x_scale_sign_q[g] == w_scale_sign_q[g]);
       scale_prod_any_negative_infinity_d[g] |= (x_scale_flags_q[g].is_infinity | w_scale_flags_q[g].is_infinity) & (x_scale_sign_q[g] ^ w_scale_sign_q[g]);
-      scale_prod_any_zero_d[g]              |= (x_scale_flags_q[g].is_zero | x_scale_flags_q[g].is_zero);
+      scale_prod_any_zero_d[g]              |= (x_scale_flags_q[g].is_zero | w_scale_flags_q[g].is_zero);
     end
   end
 

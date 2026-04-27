@@ -98,6 +98,9 @@ module auteur_dotp
   fp_flags_t [NrIn-1:0]                               x_flags_d, x_flags_q,
                                                       w_flags_d, w_flags_q;
 
+  dotp_cfg_t                                          cfg_mant_inputs_d, cfg_mant_inputs_q;
+  dotp_cfg_t                                          cfg_exp_inputs_d, cfg_exp_inputs_q;
+
   logic in_valid_mant_d, in_valid_mant_q,
         in_valid_exp_d, in_valid_exp_q;
 
@@ -117,16 +120,22 @@ module auteur_dotp
   assign in_valid_mant_d = in_valid_i;
   assign in_valid_exp_d  = in_valid_i;
 
-  `AUTEUR_PIPE(x_sign_pipe , PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0]                                   , x_sign_d , x_sign_q , in_valid_mant_d)
-  `AUTEUR_PIPE(x_exp_pipe  , PipeCfg.input_path.exponent_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0]            , x_exp_d  , x_exp_q  , in_valid_exp_d )
-  `AUTEUR_PIPE(x_mant_pipe , PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtManBits+InManUnnorm-1:0], x_mant_d , x_mant_q , in_valid_mant_d)
-  `AUTEUR_PIPE(x_flags_pipe, PipeCfg.input_path.mantissa_path.inputs, fp_flags_t [NrIn-1:0]                              , x_flags_d, x_flags_q, in_valid_mant_d)
+  assign cfg_mant_inputs_d = cfg_i;
+  assign cfg_exp_inputs_d  = cfg_i;
+
+  `AUTEUR_PIPE(cfg_mant_inputs_pipe,  PipeCfg.input_path.mantissa_path.inputs, dotp_cfg_t                                        , cfg_mant_inputs_d, cfg_mant_inputs_q, in_valid_mant_d)
+  `AUTEUR_PIPE(cfg_exp_inputs_pipe ,  PipeCfg.input_path.exponent_path.inputs, dotp_cfg_t                                        , cfg_exp_inputs_d , cfg_exp_inputs_q , in_valid_exp_d )
+
+  `AUTEUR_PIPE(x_sign_pipe         , PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0]                                   , x_sign_d         , x_sign_q         , in_valid_mant_d)
+  `AUTEUR_PIPE(x_exp_pipe          , PipeCfg.input_path.exponent_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0]            , x_exp_d          , x_exp_q          , in_valid_exp_d )
+  `AUTEUR_PIPE(x_mant_pipe         , PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtManBits+InManUnnorm-1:0], x_mant_d         , x_mant_q         , in_valid_mant_d)
+  `AUTEUR_PIPE(x_flags_pipe        , PipeCfg.input_path.mantissa_path.inputs, fp_flags_t [NrIn-1:0]                              , x_flags_d        , x_flags_q        , in_valid_mant_d)
 
 
-  `AUTEUR_PIPE(w_sign_pipe , PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0]                                   , w_sign_d , w_sign_q , in_valid_mant_d)
-  `AUTEUR_PIPE(w_exp_pipe  , PipeCfg.input_path.exponent_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0]            , w_exp_d  , w_exp_q  , in_valid_exp_d )
-  `AUTEUR_PIPE(w_mant_pipe , PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtManBits+InManUnnorm-1:0], w_mant_d , w_mant_q , in_valid_mant_d)
-  `AUTEUR_PIPE(w_flags_pipe, PipeCfg.input_path.mantissa_path.inputs, fp_flags_t [NrIn-1:0]                              , w_flags_d, w_flags_q, in_valid_mant_d)
+  `AUTEUR_PIPE(w_sign_pipe         , PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0]                                   , w_sign_d         , w_sign_q         , in_valid_mant_d)
+  `AUTEUR_PIPE(w_exp_pipe          , PipeCfg.input_path.exponent_path.inputs, logic [NrIn-1:0][InSuperFmtExpBits-1:0]            , w_exp_d          , w_exp_q          , in_valid_exp_d )
+  `AUTEUR_PIPE(w_mant_pipe         , PipeCfg.input_path.mantissa_path.inputs, logic [NrIn-1:0][InSuperFmtManBits+InManUnnorm-1:0], w_mant_d         , w_mant_q         , in_valid_mant_d)
+  `AUTEUR_PIPE(w_flags_pipe        , PipeCfg.input_path.mantissa_path.inputs, fp_flags_t [NrIn-1:0]                              , w_flags_d        , w_flags_q        , in_valid_mant_d)
 
   `AUTEUR_PIPE_VALID(in_valid_mant_pipe, PipeCfg.input_path.mantissa_path.inputs, in_valid_mant_d, in_valid_mant_q)
   `AUTEUR_PIPE_VALID(in_valid_exp_pipe , PipeCfg.input_path.exponent_path.inputs, in_valid_exp_d , in_valid_exp_q )
@@ -145,10 +154,10 @@ module auteur_dotp
     in_prod_any_negative_infinity_d = '0;
     in_prod_any_zero_d              = '0;
 
-    if (cfg_i.num_joins <= NrMaxJoins) begin
+    if (cfg_mant_inputs_q.num_joins <= NrMaxJoins) begin
       for (int unsigned g = 0; g < NrMxGroups; g++) begin
         for (int unsigned i = 0; i < MxGroupSize; i++) begin
-          if (i % (1<<cfg_i.num_joins) == 0) begin
+          if (i % (1<<cfg_mant_inputs_q.num_joins) == 0) begin
             in_is_infinity_d[g] |= x_flags_q[g*MxGroupSize+i].is_infinity | w_flags_q[g*MxGroupSize+i].is_infinity;
             in_is_nan_d[g]      |= x_flags_q[g*MxGroupSize+i].is_nan | w_flags_q[g*MxGroupSize+i].is_nan | (x_flags_q[g*MxGroupSize+i].is_infinity & w_flags_q[g*MxGroupSize+i].is_zero) | (w_flags_q[g*MxGroupSize+i].is_infinity & x_flags_q[g*MxGroupSize+i].is_zero);
 
@@ -183,8 +192,8 @@ module auteur_dotp
 
     // If the input mantissa is normalized, we statically set the leading bit
     if (InManUnnorm == 0) begin
-      assign x_lead = (i+1)%(1<<cfg_i.num_joins) == 0 ? ~x_flags_q[i].is_denormal : 1'b0;
-      assign w_lead = (i+1)%(1<<cfg_i.num_joins) == 0 ? ~w_flags_q[i].is_denormal : 1'b0;
+      assign x_lead = (i+1)%(1<<cfg_mant_inputs_q.num_joins) == 0 ? ~x_flags_q[i].is_denormal : 1'b0;
+      assign w_lead = (i+1)%(1<<cfg_mant_inputs_q.num_joins) == 0 ? ~w_flags_q[i].is_denormal : 1'b0;
     end else begin
       assign x_lead = x_mant_q[i][InSuperFmtManBits];
       assign w_lead = w_mant_q[i][InSuperFmtManBits];
@@ -218,8 +227,8 @@ module auteur_dotp
 
           x_cat_l[InSuperFmtManBits*JoinWidth] = 1'b0;
           w_cat_l[InSuperFmtManBits*JoinWidth] = 1'b0;
-          x_cat_h[InSuperFmtManBits*JoinWidth] = ((c+2)*JoinWidth)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
-          w_cat_h[InSuperFmtManBits*JoinWidth] = ((c+2)*JoinWidth)%(1<<cfg_i.num_joins) == 0 ? 1'b1 : 1'b0;
+          x_cat_h[InSuperFmtManBits*JoinWidth] = ((c+2)*JoinWidth)%(1<<cfg_mant_inputs_q.num_joins) == 0 ? 1'b1 : 1'b0;
+          w_cat_h[InSuperFmtManBits*JoinWidth] = ((c+2)*JoinWidth)%(1<<cfg_mant_inputs_q.num_joins) == 0 ? 1'b1 : 1'b0;
         end else begin
           x_cat_l = x_mant_q[(c+1)*JoinWidth-1:c*JoinWidth];
           w_cat_l = w_mant_q[(c+1)*JoinWidth-1:c*JoinWidth];
@@ -233,11 +242,11 @@ module auteur_dotp
           assign prod_mant_carry[s+1][i] = prod_mant_carry[s][i];
         end
 
-        assign prod_exp_carry[s+1][i]  = i == (c+1)*JoinWidth-1 ? (cfg_i.num_joins <= s ? prod_exp_carry[s][i] : 1'b0) : prod_exp_carry[s][i];
+        assign prod_exp_carry[s+1][i] = i == (c+1)*JoinWidth-1 ? (cfg_exp_inputs_q.num_joins <= s ? prod_exp_carry[s][i] : 1'b0) : prod_exp_carry[s][i];
       end
 
-      assign prod_mant_lh = cfg_i.num_joins > s ? x_cat_l*w_cat_h : '0;
-      assign prod_mant_hl = cfg_i.num_joins > s ? x_cat_h*w_cat_l : '0;
+      assign prod_mant_lh = cfg_mant_inputs_q.num_joins > s ? x_cat_l*w_cat_h : '0;
+      assign prod_mant_hl = cfg_mant_inputs_q.num_joins > s ? x_cat_h*w_cat_l : '0;
 
       if (InManUnnorm == 0) begin : gen_norm_products
         assign {mant_carry,prod_mant_no_carry[s+1][(c+2)*JoinWidth-1:c*JoinWidth]} = prod_mant_no_carry[s][(c+2)*JoinWidth-1:c*JoinWidth] + {prod_mant_lh,{(InSuperFmtManBits*JoinWidth){1'b0}}} + {prod_mant_hl,{(InSuperFmtManBits*JoinWidth){1'b0}}};
@@ -257,11 +266,11 @@ module auteur_dotp
         end
       end
 
-      assign {exp_carry,prod_exp_no_carry[s+1][(c+2)*JoinWidth-1:c*JoinWidth]} = prod_exp_no_carry[s][(c+2)*JoinWidth-1:c*JoinWidth] + (cfg_i.num_joins > s ? {prod_exp_carry[s][(c+2)*JoinWidth-JoinWidth-1],{(InSuperFmtExpBits*JoinWidth){1'b0}}} : '0);
+      assign {exp_carry,prod_exp_no_carry[s+1][(c+2)*JoinWidth-1:c*JoinWidth]} = prod_exp_no_carry[s][(c+2)*JoinWidth-1:c*JoinWidth] + (cfg_exp_inputs_q.num_joins > s ? {prod_exp_carry[s][(c+2)*JoinWidth-JoinWidth-1],{(InSuperFmtExpBits*JoinWidth){1'b0}}} : '0);
       assign prod_exp_carry[s+1][(c+2)*JoinWidth-1]                            = prod_exp_carry[s][(c+2)*JoinWidth-1] + exp_carry;
 
       for (genvar i = c*JoinWidth; i < (c+2)*JoinWidth-1; i++) begin : assign_changed_signs
-        assign prod_sign[s+1][i] = cfg_i.num_joins > s ? prod_sign[s][(c+2)*JoinWidth-1] : prod_sign[s][i];
+        assign prod_sign[s+1][i] = cfg_mant_inputs_q.num_joins > s ? prod_sign[s][(c+2)*JoinWidth-1] : prod_sign[s][i];
       end
 
       assign prod_sign[s+1][(c+2)*JoinWidth-1] = prod_sign[s][(c+2)*JoinWidth-1];
@@ -279,6 +288,8 @@ module auteur_dotp
   logic                                     prod_mant_valid_d, prod_mant_valid_q;
   logic                                     prod_exp_valid_d, prod_exp_valid_q;
 
+  dotp_cfg_t                                cfg_exp_input_products_d, cfg_exp_input_products_q;
+
   assign prod_mant_valid_d    = in_valid_mant_q;
   assign prod_exp_valid_d     = in_valid_exp_q;
 
@@ -289,6 +300,10 @@ module auteur_dotp
   assign prod_exp_carry_d     = prod_exp_carry[NrMaxJoins];
 
   assign prod_sign_d          = prod_sign[NrMaxJoins];
+
+  assign cfg_exp_input_products_d = cfg_exp_inputs_q;
+
+  `AUTEUR_PIPE(cfg_exp_input_products_pipe, PipeCfg.input_path.exponent_path.input_products, dotp_cfg_t, cfg_exp_input_products_d, cfg_exp_input_products_q, prod_exp_valid_d)
 
   `AUTEUR_PIPE(prod_mant_no_carry_pipe, PipeCfg.input_path.mantissa_path.input_products, logic [NrIn-1:0][2*InSuperFmtManBits-1:0], prod_mant_no_carry_d, prod_mant_no_carry_q, prod_mant_valid_d)
   `AUTEUR_PIPE(prod_mant_carry_pipe   , PipeCfg.input_path.mantissa_path.input_products, logic [NrIn-1:0][1:0]                    , prod_mant_carry_d   , prod_mant_carry_q   , prod_mant_valid_d)
@@ -307,17 +322,23 @@ module auteur_dotp
 
   logic prod_exp_valid_fifo_d, prod_exp_valid_fifo_q;
 
+  dotp_cfg_t cfg_exp_fifo_d, cfg_exp_fifo_q;
+
   assign prod_exp_valid_fifo_d = prod_exp_valid_q;
 
   assign prod_exp_no_carry_fifo_d = prod_exp_no_carry_q;
   assign prod_exp_carry_fifo_d    = prod_exp_carry_q;
 
+  assign cfg_exp_fifo_d = cfg_exp_input_products_q;
+
   `AUTEUR_PIPE_VALID(in_valid_exps_pipe, get_exp_mant_input_margin(PipeCfg), prod_exp_valid_fifo_d, prod_exp_valid_fifo_q)
 
   if (SyncWithFifos) begin
+    `AUTEUR_FIFO(cfg_exp_fifo          , get_exp_mant_input_margin(PipeCfg), dotp_cfg_t                             , cfg_exp_fifo_d          , cfg_exp_fifo_q          , prod_exp_valid_fifo_d, prod_exp_valid_fifo_q)
     `AUTEUR_FIFO(prod_exp_no_carry_fifo, get_exp_mant_input_margin(PipeCfg), logic [NrIn-1:0][InSuperFmtExpBits-1:0], prod_exp_no_carry_fifo_d, prod_exp_no_carry_fifo_q, prod_exp_valid_fifo_d, prod_exp_valid_fifo_q)
     `AUTEUR_FIFO(prod_exp_carry_fifo   , get_exp_mant_input_margin(PipeCfg), logic [NrIn-1:0]                       , prod_exp_carry_fifo_d   , prod_exp_carry_fifo_q   , prod_exp_valid_fifo_d, prod_exp_valid_fifo_q)
   end else begin
+    `AUTEUR_PIPE(cfg_exp_fifo          , get_exp_mant_input_margin(PipeCfg), dotp_cfg_t                             , cfg_exp_fifo_d          , cfg_exp_fifo_q          , prod_exp_valid_fifo_d)
     `AUTEUR_PIPE(prod_exp_no_carry_fifo, get_exp_mant_input_margin(PipeCfg), logic [NrIn-1:0][InSuperFmtExpBits-1:0], prod_exp_no_carry_fifo_d, prod_exp_no_carry_fifo_q, prod_exp_valid_fifo_d)
     `AUTEUR_PIPE(prod_exp_carry_fifo   , get_exp_mant_input_margin(PipeCfg), logic [NrIn-1:0]                       , prod_exp_carry_fifo_d   , prod_exp_carry_fifo_q   , prod_exp_valid_fifo_d)
   end
@@ -498,8 +519,8 @@ module auteur_dotp
           // Do not even consider the carry in if this is the last comparator.
           // Without this, the synthesis tool reports a out of bounds index (even though this can't actually happen!).
           if (c != MaxInWidth-1) begin
-            assign comp_carry_in[0] = (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][0];
-            assign comp_carry_in[1] = (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][1];
+            assign comp_carry_in[0] = (c+1) % (1<<cfg_exp_fifo_q.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][0];
+            assign comp_carry_in[1] = (c+1) % (1<<cfg_exp_fifo_q.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][1];
           end else begin
             assign comp_carry_in[0] = 1'b0;
             assign comp_carry_in[1] = 1'b0;
@@ -525,14 +546,14 @@ module auteur_dotp
         for (genvar c = 0; c < NodeWidth; c++) begin : gen_comparators
           logic [1:0] comp_carry_in;
 
-          assign comp_carry_in[0] = c == NodeWidth-1 ? s>=(NrMaxJoins-cfg_i.num_joins) : (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][0];
-          assign comp_carry_in[1] = c == NodeWidth-1 ? 1'b0                            : (c+1) % (1<<cfg_i.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][1];
+          assign comp_carry_in[0] = c == NodeWidth-1 ? s>=(NrMaxJoins-cfg_exp_fifo_q.num_joins) : (c+1) % (1<<cfg_exp_fifo_q.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][0];
+          assign comp_carry_in[1] = c == NodeWidth-1 ? 1'b0                                     : (c+1) % (1<<cfg_exp_fifo_q.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][1];
 
           assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
           assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} <  {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
 
           assign max_in_prod_exps_narrow_tree_stages[s+1][n+c]           = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]} ? max_in_prod_exps_narrow_tree_stages[s][n+c] : max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c];
-          assign max_in_prod_exps_narrow_tree_stages[s+1][n+NodeWidth+c] = s>=(NrMaxJoins-cfg_i.num_joins) ? max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c] : max_in_prod_exps_narrow_tree_stages[s+1][n+c];
+          assign max_in_prod_exps_narrow_tree_stages[s+1][n+NodeWidth+c] = s>=(NrMaxJoins-cfg_exp_fifo_q.num_joins) ? max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c] : max_in_prod_exps_narrow_tree_stages[s+1][n+c];
         end
       end
     end
@@ -574,13 +595,15 @@ module auteur_dotp
 
   logic                                                  maximum_exponent_valid_d, maximum_exponent_valid_q;
 
+  dotp_cfg_t                                             cfg_exp_max_exp_d, cfg_exp_max_exp_q;
+
   for (genvar g = 0; g < NrMxGroups; g++) begin : assign_max_in_prod_exps_norm_wide
     always_comb begin : assign_group_max_in_prod_exps_norm_wide
       max_in_prod_exps_norm_wide[g] = '0;
 
       for (int unsigned e = 0; e < MaxInWidth; e++) begin
         // Actual (nonconstant) loop bound, put inside the body of the loop to avoid synthesis problems
-        if (e >= 1<<cfg_i.num_joins) begin
+        if (e >= 1<<cfg_exp_fifo_q.num_joins) begin
           break;
         end
 
@@ -590,7 +613,7 @@ module auteur_dotp
 
       for (int unsigned i = MaxInWidth*InSuperFmtExpBits-1; i >= InSuperFmtExpBits; i--) begin
         // Actual (nonconstant) loop bound, just like the other one
-        if (i < (1<<cfg_i.num_joins)*InSuperFmtExpBits) begin
+        if (i < (1<<cfg_exp_fifo_q.num_joins)*InSuperFmtExpBits) begin
           break;
         end
 
@@ -637,6 +660,10 @@ module auteur_dotp
 
   assign maximum_exponent_valid_d = prod_exp_valid_fifo_q;
 
+  assign cfg_exp_max_exp_d = cfg_exp_fifo_q;
+
+  `AUTEUR_PIPE(cfg_exp_max_exp_pipe       , PipeCfg.input_path.exponent_path.maximum_exponent, dotp_cfg_t                                                   , cfg_exp_max_exp_d       , cfg_exp_max_exp_q       , maximum_exponent_valid_d)
+
   `AUTEUR_PIPE(in_shifts_wrt_in_pipe      , PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrInMaxWidth-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0], in_shifts_wrt_in_d      , in_shifts_wrt_in_q      , maximum_exponent_valid_d)
   `AUTEUR_PIPE(absolute_max_exp_pipe      , PipeCfg.input_path.exponent_path.maximum_exponent, logic [OutSuperFmtExpBits-1:0]                               , absolute_max_exp_d      , absolute_max_exp_q      , maximum_exponent_valid_d)
   `AUTEUR_PIPE(scale_shift_adj_pipe       , PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrMxScales-1:0][OutSuperFmtExpBits-1:0]               , scale_shift_adj_d       , scale_shift_adj_q       , maximum_exponent_valid_d)
@@ -679,7 +706,7 @@ module auteur_dotp
     logic [MaxInWidth*InSuperFmtExpBits:0] shift_wide;
     logic                                  overflow;
 
-    assign fmt_width = 1<<cfg_i.num_joins;
+    assign fmt_width = 1<<cfg_exp_max_exp_q.num_joins;
     assign fmt_start = i[NrMaxJoins-1:0] & ~(fmt_width-1);
 
     always_comb begin : assign_wide_shifts
@@ -711,7 +738,7 @@ module auteur_dotp
     logic [ShiftAmountWidth-1:0] local_shift_adj;
 
     assign {overflow,local_shift}          = in_shift + in_shifts_norm[i] + scale_shift_adj_q[i/MxGroupSize];
-    assign {overflow_adj, local_shift_adj} = local_shift + ((MaxInWidth - i - 1) % (1<<cfg_i.num_joins)) * ((InSuperFmtManBits+InManUnnorm) * 2); // Adjust the local shift if it is part of a larger mantissa
+    assign {overflow_adj, local_shift_adj} = local_shift + ((MaxInWidth - i - 1) % (1<<cfg_exp_max_exp_q.num_joins)) * ((InSuperFmtManBits+InManUnnorm) * 2); // Adjust the local shift if it is part of a larger mantissa
     assign in_shifts_final_d[i]            = |overflow || overflow_adj ? '1 : local_shift_adj;
   end
 

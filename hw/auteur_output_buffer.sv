@@ -10,19 +10,16 @@ module auteur_output_buffer #(
   parameter int unsigned BankAddrStart = 1,
 
   localparam int unsigned AddrWidth = Depth > 1 ? $clog2(Depth) : 1,
-  localparam int unsigned BeWidth   = DataWidth/ByteWidth,
 
   localparam type req_t = struct packed {
     logic                 valid;
     logic [AddrWidth-1:0] addr;
     logic                 we;
     logic [DataWidth-1:0] wdata;
-    logic [BeWidth-1:0]   be;
   },
 
   localparam type rsp_t = struct packed {
     logic                 valid;
-    logic                 ready;
     logic [DataWidth-1:0] rdata;
   }
 ) (
@@ -52,7 +49,7 @@ module auteur_output_buffer #(
 
     assign bank_addr[i] = req_i[i].addr[BankAddrStart+:BankAddrWidth];
 
-    assign req_valid_d[i] = req_i[i].valid && rsp_o[i].ready;
+    assign req_valid_d[i] = req_i[i].valid;
 
     always_ff @(posedge clk_i or negedge rst_ni) begin : track_selected_bank
       if (~rst_ni) begin
@@ -72,7 +69,6 @@ module auteur_output_buffer #(
   end
 
   for (genvar i = 0; i < 3; i++) begin : assign_rsp
-    assign rsp_o[i].ready = winner[bank_sel_d[i]] == i;
     assign rsp_o[i].valid = req_valid_q[i];
     assign rsp_o[i].rdata = bank_rdata[bank_sel_q[i]];
   end
@@ -113,7 +109,7 @@ module auteur_output_buffer #(
       .we_i (req_i[winner[b]].we),
       .addr_i (bank_addr[winner[b]]),
       .wdata_i (req_i[winner[b]].wdata),
-      .be_i (req_i[winner[b]].be),
+      .be_i ('1),
       .rdata_o (bank_rdata[b])
     );
   end

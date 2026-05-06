@@ -60,11 +60,6 @@ module auteur_broker
   input  logic                                                                              rst_ni,
   input  logic [GroupIdWidth-1:0]                                                           group_id_i,
 
-  input  ctrl_req_t                                                                         ctrl_req_i,
-  output ctrl_rsp_t                                                                         ctrl_rsp_o,
-  output ctrl_req_t                                                                         ctrl_req_o,
-  input  ctrl_rsp_t                                                                         ctrl_rsp_i,
-
   input  write_req_t                                                                        write_req_i,
   output write_req_t                                                                        write_req_o,
 
@@ -76,7 +71,7 @@ module auteur_broker
   output input_buffer_req_t [GroupSizeX+GroupSizeW-1:0]                                     input_buffer_req_o,
 
   output output_buffer_req_t [GroupSizeX-1:0][NrOutputBuffersW-1:0][NrOutputBufferReqs-1:0] output_buffer_req_o,
-  input  output_buffer_rsp_t [GroupSizeX-1:0][NrOutputBuffersW-1:0]                         output_buffer_rsp_i,
+  input  output_buffer_rsp_t [GroupSizeX-1:0][NrOutputBuffersW-1:0]                         output_buffer_rsp_i
 );
 
   logic write_is_local;
@@ -85,7 +80,7 @@ module auteur_broker
 
   write_req_t write_req_q;
 
-  always_ff @(posedge clk_i or negedge rst_ni) begin : out_req_resiter
+  always_ff @(posedge clk_i or negedge rst_ni) begin : write_req_resiter
     if (~rst_ni) begin
       write_req_q <= '0;
     end else begin
@@ -106,11 +101,11 @@ module auteur_broker
 
   read_req_t read_req_q;
 
-  always_ff @(posedge clk_i or negedge rst_ni) begin : out_req_resiter
+  always_ff @(posedge clk_i or negedge rst_ni) begin : read_req_resiter
     if (~rst_ni) begin
       read_req_q <= '0;
     end else begin
-      if (~is_local) begin
+      if (~read_is_local) begin
         read_req_q <= read_req_i;
       end else if (read_req_q.valid) begin
         read_req_q.valid <= 1'b0;
@@ -123,7 +118,7 @@ module auteur_broker
 
   read_rsp_t read_rsp_q;
 
-  always_ff @(posedge clk_i or negedge rst_ni) begin : in_rsp_resiter
+  always_ff @(posedge clk_i or negedge rst_ni) begin : read_rsp_resiter
     if (~rst_ni) begin
       read_rsp_q <= '0;
     end else begin
@@ -171,7 +166,7 @@ module auteur_broker
 
         buf_addr = write_req_i.addr[InputBufferAddrWidth+:$clog2(GroupSizeX+GroupSizeW)];
 
-        assign input_buffer_req_o[buf_addr] = '{
+        input_buffer_req_o[buf_addr] = '{
           valid: write_req_i.valid,
           addr:  write_req_i.addr[InputBufferAddrWidth-1:0],
           wdata: write_req_i.wdata

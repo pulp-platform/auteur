@@ -18,7 +18,7 @@ module auteur_group
   parameter int unsigned    ScaleFmtWidth = 1,
   parameter int unsigned    OutFmtWidth = 1,
   parameter int unsigned    NrIn = 1,
-  parameter int unsigned    NrMaxJoins = 1,
+  parameter int unsigned    NrMaxJoins = 0,
   parameter int unsigned    MxGroupSize = NrIn,
   parameter int unsigned    InSuperFmtManBits = 1,
   parameter int unsigned    InSuperFmtExpBits = 1,
@@ -42,11 +42,13 @@ module auteur_group
   parameter int unsigned    InputBufferTotDepth = 1,
   parameter int unsigned    InputBufferDepth = 1,
   parameter int unsigned    InputBufferBanks = 2,
-  parameter bit             InputBufferLatches = 0
+  parameter bit             InputBufferLatches = 0,
 
   localparam int unsigned NrMxGroups = NrIn/MxGroupSize,
 
   localparam int unsigned DataWidth = OutFmtWidth*IntercoWidth,
+
+  localparam int unsigned InputBufferWideWord = NrIn * BaseInFmtWidth + NrMxGroups * ScaleFmtWidth,
 
   localparam int unsigned OutputBufferAddrWidth = OutputBufferDepth > 1 ? $clog2(OutputBufferDepth) : 1,
   localparam int unsigned InputBufferWideAddrWidth = InputBufferDepth > 1 ? $clog2(InputBufferDepth) : 1,
@@ -54,21 +56,19 @@ module auteur_group
 
   localparam int unsigned NrOutputBuffersW = GroupSizeW/IntercoWidth,
 
-  localparam int unsigned InputBufferWideWord = NrIn * BaseInFmtWidth + NrMxGroups * ScaleFmtWidth,
-
   localparam int unsigned OutputBufferSize = GroupSizeX * GroupSizeW * OutputBufferDepth * OutputBufferBanks / IntercoWidth,
   localparam int unsigned InputBufferSize  = 2 * (GroupSizeX + GroupSizeW) * InputBufferBanks * InputBufferDepth * InputBufferWideWord / DataWidth / IntercoWidth,
 
-  localparam int unsigned InFmtWidth = NrInFormats > 1 ? $clog2(NrInFormats) : 1,
-  localparam int unsigned ScaleFmtWidth = ScaleFmtWidth > 1 ? $clog2(ScaleFmtWidth) : 1,
-  localparam int unsigned OutFmtWidth = OutFmtWidth > 1 ? $clog2(OutFmtWidth) : 1,
+  localparam int unsigned InFmtSelWidth = NrInFormats > 1 ? $clog2(NrInFormats) : 1,
+  localparam int unsigned ScaleFmtSelWidth = NrScaleFormats > 1 ? $clog2(NrScaleFormats) : 1,
+  localparam int unsigned OutFmtSelWidth = NrOutFormats > 1 ? $clog2(NrOutFormats) : 1,
 
   localparam int unsigned InIterWidth = InputBufferTotDepth > 1 ? $clog2(InputBufferTotDepth) : 1,
 
   localparam type fmt_cfg_t = struct packed {
-    logic [InFmtWidth-1:0]    in_fmt;
-    logic [ScaleFmtWidth-1:0] scale_fmt;
-    logic [OutFmtWidth-1:0]   out_fmt;
+    logic [InFmtSelWidth-1:0]    in_fmt;
+    logic [ScaleFmtSelWidth-1:0] scale_fmt;
+    logic [OutFmtSelWidth-1:0]   out_fmt;
   },
 
   localparam type ctrl_t = struct packed {
@@ -121,29 +121,28 @@ module auteur_group
   input  read_rsp_t                                      read_rsp_i
 );
 
-  localparam type input_buffer_req_t = struct packed {
+  typedef struct packed {
     logic                                  valid;
     logic [InputBufferNarrowAddrWidth-1:0] addr;
-    logic                                  we;
     logic [WriteDataWidth-1:0]             wdata;
-  };
+  } input_buffer_req_t;
 
-  localparam type output_buffer_req_t = struct packed {
+  typedef struct packed {
     logic                             valid;
     logic [OutputBufferAddrWidth-1:0] addr;
     logic                             we;
     logic [WriteDataWidth-1:0]        wdata;
-  };
+  } output_buffer_req_t;
 
-  localparam type output_buffer_rsp_t = struct packed {
+  typedef struct packed {
     logic                     valid;
     logic [ReadDataWidth-1:0] rdata;
-  };
+  } output_buffer_rsp_t;
 
-  localparam type input_buffer_wide_req_t = struct packed {
+  typedef struct packed {
     logic                                valid;
     logic [InputBufferWideAddrWidth-1:0] addr;
-  }
+  } input_buffer_wide_req_t;
 
   input_buffer_req_t  [GroupSizeX+GroupSizeW-1:0]            input_buffer_req;
   output_buffer_req_t [GroupSizeX-1:0][NrOutputBuffersW-1:0] output_buffer_req;
@@ -187,11 +186,11 @@ module auteur_group
     .DotpDelay (auteur_pkg::get_total_delay(PipeCfg)),
     .OutputBufferAddrWidth (OutputBufferAddrWidth),
     .InputBufferAddrWidth (InputBufferWideAddrWidth),
-    .InFmtWidth (InFmtWidth),
-    .ScaleFmtWidth (ScaleFmtWidth),
-    .OutFmtWidth (OutFmtWidth),
+    .InFmtSelWidth (InFmtSelWidth),
+    .ScaleFmtSelWidth (ScaleFmtSelWidth),
+    .OutFmtSelWidth (OutFmtSelWidth),
     .InputBufferTotDepth(InputBufferTotDepth)
-  ) (
+  ) i_local_ctrl (
     .clk_i (clk_i),
     .rst_ni (rst_ni),
     .valid_i (ctrl_valid_i),
@@ -218,7 +217,7 @@ module auteur_group
   logic [GroupSizeX-1:0][NrMxGroups-1:0][ScaleFmtWidth-1:0] x_scale_buf;
   logic [GroupSizeW-1:0][NrMxGroups-1:0][ScaleFmtWidth-1:0] w_scale_buf;
 
-  input_buffer_wide_req_t x_write_req, x_read_req;
+  input_buffer_wide_req_t x_write_req, x_read_req, w_write_req, w_read_req;
 
   assign x_write_req = '{
     valid: x_iter,
@@ -285,26 +284,26 @@ module auteur_group
       logic [IntercoWidth-1:0][OutFmtWidth-1:0] y_ce, z_ce;
       logic [IntercoWidth-1:0]                  z_ce_valid;
 
-      buf_req_t buf_req_ce_read, buf_req_ce_write;
-      buf_rsp_t buf_rsp_ce_read, buf_rsp_ce_write;
+      output_buffer_req_t buf_req_ce_read, buf_req_ce_write;
+      output_buffer_rsp_t buf_rsp_ce_read, buf_rsp_ce_write;
 
       assign buf_req_ce_read = '{
-        valid: addr_valid,
+        valid: addr_valid && bias_en,
         addr: out_read_addr,
         we: 1'b0,
-        wdata: '0,
+        wdata: '0
       };
 
       assign buf_req_ce_write = '{
         valid: z_ce_valid[0],
         addr: out_write_addr,
         we: 1'b1,
-        wdata: z_ce,
+        wdata: z_ce
       };
 
-      assign y_ce = buf_req_ce_read.rdata;
+      assign y_ce = bias_en ? buf_rsp_ce_read.rdata : '0;
 
-      for (genvar i = 0; i < IntercoWidth; i++) begin
+      for (genvar i = 0; i < IntercoWidth; i++) begin : gen_local_ces
         auteur_ce #(
           .BaseInFmtWidth (BaseInFmtWidth),
           .ScaleFmtWidth (ScaleFmtWidth),
@@ -348,7 +347,7 @@ module auteur_group
 
         // This CE will for sure be active
         if (x == 0 && w == 0 && i == 0) begin
-          out_valid = z_ce_valid[i];
+          assign out_valid = z_ce_valid[i];
         end
       end
 

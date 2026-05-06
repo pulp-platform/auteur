@@ -431,7 +431,7 @@ module auteur_dotp
 
     for (int unsigned g = 0; g < NrMxGroups; g++) begin
       scale_is_infinity_d[g] = x_scale_flags_q[g].is_infinity | w_scale_flags_q[g].is_infinity;
-      scale_is_nan_d[g]      = x_scale_flags_q[g].is_nan | w_scale_flags_q[g].is_nan | (x_scale_flags_q[g].is_infinity & w_scale_flags_q[g].is_zero) | (w_scale_flags_q[g].is_infinity | x_scale_flags_q[g].is_zero);
+      scale_is_nan_d[g]      = x_scale_flags_q[g].is_nan | w_scale_flags_q[g].is_nan | (x_scale_flags_q[g].is_infinity & w_scale_flags_q[g].is_zero) | (w_scale_flags_q[g].is_infinity & x_scale_flags_q[g].is_zero);
 
       scale_prod_any_positive_infinity_d[g] = (x_scale_flags_q[g].is_infinity | w_scale_flags_q[g].is_infinity) & (x_scale_sign_q[g] == w_scale_sign_q[g]);
       scale_prod_any_negative_infinity_d[g] = (x_scale_flags_q[g].is_infinity | w_scale_flags_q[g].is_infinity) & (x_scale_sign_q[g] ^ w_scale_sign_q[g]);

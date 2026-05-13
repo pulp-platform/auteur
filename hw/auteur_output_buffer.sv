@@ -8,6 +8,7 @@ module auteur_output_buffer #(
   parameter int unsigned Depth = 1,
   parameter int unsigned NrBanks = 2,
   parameter int unsigned BankAddrStart = 1,
+  parameter int unsigned NrPorts = NrBanks,
 
   localparam int unsigned AddrWidth = Depth > 1 ? $clog2(Depth) : 1,
 
@@ -23,22 +24,23 @@ module auteur_output_buffer #(
     logic [DataWidth-1:0] rdata;
   }
 ) (
-  input  logic       clk_i,
-  input  logic       rst_ni,
-  input  req_t [2:0] req_i,
-  output rsp_t [2:0] rsp_o
+  input  logic               clk_i,
+  input  logic               rst_ni,
+  input  req_t [NrPorts-1:0] req_i,
+  output rsp_t [NrPorts-1:0] rsp_o
 );
   localparam int unsigned BankAddrWidth = Depth/NrBanks > 1 ? $clog2(Depth/NrBanks) : 1;
   localparam int unsigned BankSelWidth  = NrBanks > 1 ? $clog2(NrBanks) : 1;
+  localparam int unsigned WinnerWidth   = NrPorts > 1 ? $clog2(NrPorts) : 1;
 
-  logic [2:0][BankSelWidth-1:0] bank_sel_d, bank_sel_q;
-  logic [2:0]                   req_valid_d, req_valid_q;
-  logic [NrBanks-1:0][1:0]      winner;
+  logic [NrPorts-1:0][BankSelWidth-1:0] bank_sel_d, bank_sel_q;
+  logic [NrPorts-1:0]                   req_valid_d, req_valid_q;
+  logic [NrBanks-1:0][WinnerWidth-1:0]  winner;
 
-  logic [2:0][BankAddrWidth-1:0]     bank_addr;
-  logic [NrBanks-1:0][DataWidth-1:0] bank_rdata;
+  logic [NrPorts-1:0][BankAddrWidth-1:0] bank_addr;
+  logic [NrBanks-1:0][DataWidth-1:0]     bank_rdata;
 
-  for (genvar i = 0; i < 3; i++) begin : gen_bank_selection
+  for (genvar i = 0; i < NrPorts; i++) begin : gen_bank_selection
     if (BankAddrStart == BankSelWidth) begin
       assign bank_sel_d[i] = req_i[i].addr[BankAddrStart-1:0];
     end else if (BankAddrStart == 0) begin
@@ -49,7 +51,8 @@ module auteur_output_buffer #(
 
     assign bank_addr[i] = req_i[i].addr[BankAddrStart+:BankAddrWidth];
 
-    assign req_valid_d[i] = req_i[i].valid;
+    // Only register read transactions
+    assign req_valid_d[i] = req_i[i].valid && ~req_i[i].we;
 
     always_ff @(posedge clk_i or negedge rst_ni) begin : track_selected_bank
       if (~rst_ni) begin
@@ -68,16 +71,16 @@ module auteur_output_buffer #(
     end
   end
 
-  for (genvar i = 0; i < 3; i++) begin : assign_rsp
+  for (genvar i = 0; i < NrPorts; i++) begin : assign_rsp
     assign rsp_o[i].valid = req_valid_q[i];
     assign rsp_o[i].rdata = bank_rdata[bank_sel_q[i]];
   end
 
   for (genvar b = 0; b < NrBanks; b++) begin : gen_banks
-    logic [2:0] bank_req;
-    logic       req_valid;
+    logic [NrPorts-1:0] bank_req;
+    logic               req_valid;
 
-    for (genvar i = 0; i < 3; i++) begin : assign_bank_req
+    for (genvar i = 0; i < NrPorts; i++) begin : assign_bank_req
       assign bank_req[i] = bank_sel_d[i] == b && req_i[i].valid;
     end
 
@@ -85,7 +88,7 @@ module auteur_output_buffer #(
       winner[b] = 0;
       req_valid = 1'b0;
 
-      for (int unsigned i = 0; i < 3; i++) begin
+      for (int unsigned i = 0; i < NrPorts; i++) begin
         if (bank_req[i]) begin
           winner[b] = i;
           req_valid = 1'b1;

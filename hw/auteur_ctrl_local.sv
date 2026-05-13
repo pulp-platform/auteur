@@ -11,6 +11,8 @@ module auteur_ctrl_local #(
   parameter int unsigned OutFmtSelWidth = 1,
   // Not the local number of buffers!
   parameter int unsigned InputBufferTotDepth = 1,
+  parameter int unsigned InputBufferDepth = 1,
+  parameter int unsigned InputBufferBanks = 1,
 
   localparam int unsigned InIterWidth = InputBufferTotDepth > 1 ? $clog2(InputBufferTotDepth) : 1,
 
@@ -53,6 +55,8 @@ module auteur_ctrl_local #(
   output logic [OutputBufferAddrWidth-1:0] out_write_addr_o
 );
 
+  localparam int unsigned InputBufferBankDepth = InputBufferDepth / InputBufferBanks;
+
   logic [InIterWidth-1:0] x_iters_cnt, w_iters_cnt;
   logic                   x_iter_d, x_iter_q, w_iter_d, w_iter_q;
 
@@ -66,6 +70,8 @@ module auteur_ctrl_local #(
     .clk_i (clk_i),
     .rst_ni (rst_ni),
     .flush_i (1'b0),
+    .testmode_i (1'b0),
+    .usage_o (),
     .data_i (ctrl_i),
     .push_i (valid_i && ~fifo_full),
     .data_o (ctrl_q),
@@ -148,8 +154,8 @@ module auteur_ctrl_local #(
 
   logic [InputBufferAddrWidth-1:0]  x_addr_d, x_addr_q, w_addr_d, w_addr_q;
 
-  assign x_addr_d = ctrl_q.in_x_start_addr + x_iters_cnt / InputBufferTotDepth;
-  assign w_addr_d = ctrl_q.in_w_start_addr + w_iters_cnt / InputBufferTotDepth;
+  assign x_addr_d = ctrl_q.in_x_start_addr + x_iters_cnt / InputBufferBankDepth;
+  assign w_addr_d = ctrl_q.in_w_start_addr + w_iters_cnt / InputBufferBankDepth;
 
   always_ff @(posedge clk_i or negedge rst_ni) begin : x_addr_register
     if (~rst_ni) begin
@@ -171,24 +177,27 @@ module auteur_ctrl_local #(
     end
   end
 
-  logic [OutputBufferAddrWidth-1:0] out_write_addr_q;
+  logic [OutputBufferAddrWidth-1:0] out_read_addr_d, out_write_addr_q;
+
+  assign out_read_addr_d = ctrl_q.out_start_addr + tot_read_iters_cnt;
 
   // We use this fifo since we also support the (extremely unlikely) case in which only 1-iteration operations are issued
   fifo_v3 #(
-    .DEPTH (DotpDelay+1),
+    .DEPTH (DotpDelay+2),
     .DATA_WIDTH (OutputBufferAddrWidth)
   ) i_out_write_addr_fifo (
     .clk_i (clk_i),
     .rst_ni (rst_ni),
     .flush_i (1'b0),
-    .data_i (ctrl_q.out_start_addr),
+    .testmode_i (1'b0),
+    .usage_o (),
+    .data_i (out_read_addr_d),
     .push_i (~fifo_empty_d),
     .data_o (out_write_addr_q),
     .pop_i (out_valid_i),
     .empty_o (),
     .full_o ()
   );
-
 
   assign ready_o          = ~fifo_full;
   assign addr_valid_o     = ~fifo_empty_d;
@@ -201,7 +210,7 @@ module auteur_ctrl_local #(
   assign w_write_addr_o   = w_addr_q;
   assign x_iter_o         = x_iter_q;
   assign w_iter_o         = w_iter_q;
-  assign out_read_addr_o  = ctrl_q.out_start_addr + tot_read_iters_cnt;
+  assign out_read_addr_o  = out_read_addr_d;
   assign out_write_addr_o = out_write_addr_q;
 
 endmodule

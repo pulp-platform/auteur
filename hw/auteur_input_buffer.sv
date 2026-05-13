@@ -57,13 +57,21 @@ module auteur_input_buffer #(
   logic [NumNarrowWords-1:0][NarrowWordWidth-1:0] wdata_q;
 
   for (genvar n = 0; n < NumNarrowWords; n++) begin : gen_latch_wdata_registers
+    int unsigned narrow_word_sel;
+
+    if (NumNarrowWords != 1) begin
+      assign narrow_word_sel = narrow_req_i.addr[0+:$clog2(NumNarrowWords)];
+    end else begin
+      assign narrow_word_sel = 0;
+    end
+
     always_ff @(posedge clk_i or negedge rst_ni) begin : latch_wdata_register
       if (~rst_ni) begin
         wdata_q[n] <= '0;
       end else begin
         if (wide_write_req_i.valid) begin
           wdata_q[n] <= wide_wdata_i[NarrowWordWidth*n+:NarrowWordWidth];
-        end else if (narrow_req_i.valid && narrow_req_i.addr[0+:$clog2(NumNarrowWords)] == n) begin
+        end else if (narrow_req_i.valid && narrow_word_sel == n) begin
           wdata_q[n] <= narrow_req_i.wdata;
         end
       end
@@ -72,19 +80,48 @@ module auteur_input_buffer #(
 
   for (genvar b = 0; b < NumBanks; b++) begin : gen_buffers
     for (genvar w = 0; w < BankDepth; w++) begin : gen_wide_words
+      int unsigned wide_req_bank_sel, wide_req_wide_word_sel;
+
       logic wide_word_wen_d;
 
-      assign wide_word_wen_d = wide_write_req_i.valid                                                            &&
-                               (NumBanks  == 1 || wide_write_req_i.addr[WideAddrWidth-1-:$clog2(NumBanks)] == b) &&
-                               (BankDepth == 1 || wide_write_req_i.addr[0+:$clog2(BankDepth)]              == w);
+      if (NumBanks != 1) begin
+        assign wide_req_bank_sel = wide_write_req_i.addr[$clog2(BankDepth)+:$clog2(NumBanks)];
+      end else begin
+        assign wide_req_bank_sel = 0;
+      end
+
+      if (BankDepth != 1) begin
+        assign wide_req_wide_word_sel = wide_write_req_i.addr[0+:$clog2(BankDepth)];
+      end else begin
+        assign wide_req_wide_word_sel = 0;
+      end
+
+      assign wide_word_wen_d = wide_write_req_i.valid && wide_req_bank_sel == b && wide_req_wide_word_sel == w;
 
       for (genvar n = 0; n < NumNarrowWords; n++) begin : gen_narrow_words
+        int unsigned narrow_req_bank_sel, narrow_req_wide_word_sel, narrow_req_narrow_word_sel;
+
         logic narrow_word_wen_d;
 
-        assign narrow_word_wen_d = narrow_req_i.valid                                                                         &&
-                                   (NumBanks       == 1 || narrow_req_i.addr[NarrowAddrWidth-1-:$clog2(NumBanks)]       == b) &&
-                                   (BankDepth      == 1 || narrow_req_i.addr[$clog2(NumNarrowWords)+:$clog2(BankDepth)] == w) &&
-                                   (NumNarrowWords == 1 || narrow_req_i.addr[0+:$clog2(NumNarrowWords)]                 == n);
+        if (NumBanks != 1) begin
+          assign narrow_req_bank_sel = narrow_req_i.addr[$clog2(NumNarrowWords)+$clog2(BankDepth)+:$clog2(NumBanks)];
+        end else begin
+          assign narrow_req_bank_sel = 0;
+        end
+
+        if (BankDepth != 1) begin
+          assign narrow_req_wide_word_sel = narrow_req_i.addr[$clog2(NumNarrowWords)+:$clog2(BankDepth)];
+        end else begin
+          assign narrow_req_wide_word_sel = 0;
+        end
+
+        if (NumNarrowWords != 1) begin
+          assign narrow_req_narrow_word_sel = narrow_req_i.addr[0+:$clog2(NumNarrowWords)];
+        end else begin
+          assign narrow_req_narrow_word_sel = 0;
+        end
+
+        assign narrow_word_wen_d = narrow_req_i.valid && narrow_req_bank_sel == b && narrow_req_wide_word_sel == w && narrow_req_narrow_word_sel == n;
 
         if (UseLatches) begin : gen_latches
           logic clk_w;

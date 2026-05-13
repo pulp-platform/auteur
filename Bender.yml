@@ -19,6 +19,9 @@ sources:
     - hw/auteur_ce.sv
     - hw/auteur_packer.sv
     - hw/auteur_unpacker.sv
+    - hw/auteur_input_buffer.sv
     - hw/auteur_output_buffer.sv
+    - hw/auteur_broker.sv
+    - hw/auteur_ctrl_local.sv
     - hw/auteur_group.sv
-
+    - hw/auteur_datapath.sv

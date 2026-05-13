@@ -38,6 +38,8 @@ module auteur_group
 
   parameter int unsigned    OutputBufferDepth = 1,
   parameter int unsigned    OutputBufferBanks = 2,
+  // Whether the Read and Write requests should be made using two separate channels, allowing concurrent read and writes
+  parameter bit             OutputBufferSplitReadWrite = 0,
 
   parameter int unsigned    InputBufferTotDepth = 1,
   parameter int unsigned    InputBufferDepth = 1,
@@ -46,18 +48,17 @@ module auteur_group
 
   localparam int unsigned NrMxGroups = NrIn/MxGroupSize,
 
-  localparam int unsigned DataWidth = OutFmtWidth*IntercoWidth,
+  localparam int unsigned OutputBufferDataWidth = OutFmtWidth*IntercoWidth,
 
-  localparam int unsigned InputBufferWideWord = NrIn * BaseInFmtWidth + NrMxGroups * ScaleFmtWidth,
+  localparam int unsigned InputBufferWideWordWidth = NrIn * BaseInFmtWidth + NrMxGroups * ScaleFmtWidth,
 
   localparam int unsigned OutputBufferAddrWidth = OutputBufferDepth > 1 ? $clog2(OutputBufferDepth) : 1,
   localparam int unsigned InputBufferWideAddrWidth = InputBufferDepth > 1 ? $clog2(InputBufferDepth) : 1,
-  localparam int unsigned InputBufferNarrowAddrWidth = InputBufferWideWord/DataWidth * InputBufferDepth > 1 ? $clog2(InputBufferWideWord/DataWidth * InputBufferDepth) : 1,
 
-  localparam int unsigned NrOutputBuffersW = GroupSizeW/IntercoWidth,
+  localparam int unsigned NrOutputBuffersW = GroupSizeW / IntercoWidth,
 
   localparam int unsigned OutputBufferSize = GroupSizeX * GroupSizeW * OutputBufferDepth * OutputBufferBanks / IntercoWidth,
-  localparam int unsigned InputBufferSize  = 2 * (GroupSizeX + GroupSizeW) * InputBufferBanks * InputBufferDepth * InputBufferWideWord / DataWidth / IntercoWidth,
+  localparam int unsigned InputBufferSize  = 2 * (GroupSizeX + GroupSizeW) * InputBufferBanks * InputBufferDepth * InputBufferWideWordWidth / WriteDataWidth / IntercoWidth,
 
   localparam int unsigned InFmtSelWidth = NrInFormats > 1 ? $clog2(NrInFormats) : 1,
   localparam int unsigned ScaleFmtSelWidth = NrScaleFormats > 1 ? $clog2(NrScaleFormats) : 1,
@@ -97,46 +98,53 @@ module auteur_group
     logic [ReadDataWidth-1:0] rdata;
   }
 ) (
-  input  logic                                           clk_i,
-  input  logic                                           rst_ni,
+  input  logic                                                clk_i,
+  input  logic                                                rst_ni,
 
-  input  logic [GroupIdWidth-1:0]                        group_id_i,
+  input  logic [GroupIdWidth-1:0]                             group_id_i,
 
-  input  logic                                           ctrl_valid_i,
-  output logic                                           ctrl_ready_o,
-  input  ctrl_t                                          ctrl_i,
+  input  logic                                                ctrl_valid_i,
+  output logic                                                ctrl_ready_o,
+  input  ctrl_t                                               ctrl_i,
 
-  input  logic [GroupSizeX-1:0][InputBufferWideWord-1:0] x_ext_i,
-  input  logic [GroupSizeW-1:0][InputBufferWideWord-1:0] w_ext_i,
+  input  logic [GroupSizeX-1:0][InputBufferWideWordWidth-1:0] x_ext_i,
+  input  logic [GroupSizeW-1:0][InputBufferWideWordWidth-1:0] w_ext_i,
 
-  output logic [GroupSizeX-1:0][InputBufferWideWord-1:0] x_ext_o,
-  output logic [GroupSizeW-1:0][InputBufferWideWord-1:0] w_ext_o,
+  output logic [GroupSizeX-1:0][InputBufferWideWordWidth-1:0] x_ext_o,
+  output logic [GroupSizeW-1:0][InputBufferWideWordWidth-1:0] w_ext_o,
 
-  input  write_req_t                                     write_req_i,
-  output write_req_t                                     write_req_o,
+  input  write_req_t                                          write_req_i,
+  output write_req_t                                          write_req_o,
 
-  input  read_req_t                                      read_req_i,
-  output read_req_t                                      read_req_o,
-  output read_rsp_t                                      read_rsp_o,
-  input  read_rsp_t                                      read_rsp_i
+  input  read_req_t                                           read_req_i,
+  output read_req_t                                           read_req_o,
+  output read_rsp_t                                           read_rsp_o,
+  input  read_rsp_t                                           read_rsp_i
 );
+
+  // If the width of the write channel is greater than one wide word of the input buffer we instead write multiple input buffers in parallel
+  localparam int unsigned InputBufferNarrowWordWidth = WriteDataWidth > InputBufferWideWordWidth ? InputBufferWideWordWidth : WriteDataWidth;
+  localparam int unsigned InputBufferNarrowAddrWidth = InputBufferWideWordWidth/InputBufferNarrowWordWidth * InputBufferDepth > 1 ? $clog2(InputBufferWideWordWidth/InputBufferNarrowWordWidth * InputBufferDepth) : 1;
+
+  localparam int unsigned NrOutputBufferChannels = OutputBufferSplitReadWrite ? 2 : 1;
+  localparam int unsigned OutputBufferNrPorts = 2 + NrOutputBufferChannels;
 
   typedef struct packed {
     logic                                  valid;
     logic [InputBufferNarrowAddrWidth-1:0] addr;
-    logic [WriteDataWidth-1:0]             wdata;
+    logic [InputBufferNarrowWordWidth-1:0] wdata;
   } input_buffer_req_t;
 
   typedef struct packed {
     logic                             valid;
     logic [OutputBufferAddrWidth-1:0] addr;
     logic                             we;
-    logic [WriteDataWidth-1:0]        wdata;
+    logic [OutputBufferDataWidth-1:0] wdata;
   } output_buffer_req_t;
 
   typedef struct packed {
-    logic                     valid;
-    logic [ReadDataWidth-1:0] rdata;
+    logic                             valid;
+    logic [OutputBufferDataWidth-1:0] rdata;
   } output_buffer_rsp_t;
 
   typedef struct packed {
@@ -144,21 +152,24 @@ module auteur_group
     logic [InputBufferWideAddrWidth-1:0] addr;
   } input_buffer_wide_req_t;
 
-  input_buffer_req_t  [GroupSizeX+GroupSizeW-1:0]            input_buffer_req;
-  output_buffer_req_t [GroupSizeX-1:0][NrOutputBuffersW-1:0] output_buffer_req;
-  output_buffer_rsp_t [GroupSizeX-1:0][NrOutputBuffersW-1:0] output_buffer_rsp;
+  input_buffer_req_t  [GroupSizeX+GroupSizeW-1:0]                                        input_buffer_req;
+  output_buffer_req_t [GroupSizeX-1:0][NrOutputBuffersW-1:0][NrOutputBufferChannels-1:0] output_buffer_req;
+  output_buffer_rsp_t [GroupSizeX-1:0][NrOutputBuffersW-1:0][NrOutputBufferChannels-1:0] output_buffer_rsp;
 
   auteur_broker #(
-    .ReadAddrWidth (ReadAddrWidth),
     .WriteAddrWidth (WriteAddrWidth),
-    .ReadDataWidth (ReadDataWidth),
-    .WriteDataWidth (WriteDataWidth),
+    .ReadAddrWidth (ReadAddrWidth),
     .GroupIdWidth (GroupIdWidth),
+    .WriteDataWidth (WriteDataWidth),
+    .ReadDataWidth (ReadDataWidth),
+    .InputBufferDataWidth (InputBufferNarrowWordWidth),
+    .OutputBufferDataWidth (OutputBufferDataWidth),
     .GroupSizeX (GroupSizeX),
     .GroupSizeW (GroupSizeW),
     .IntercoWidth (IntercoWidth),
     .InputBufferAddrWidth (InputBufferNarrowAddrWidth),
-    .OutputBufferAddrWidth (OutputBufferAddrWidth)
+    .OutputBufferAddrWidth (OutputBufferAddrWidth),
+    .OutputBufferSplitReadWrite (OutputBufferSplitReadWrite)
   ) i_auteur_broker (
     .clk_i (clk_i),
     .rst_ni (rst_ni),
@@ -189,7 +200,9 @@ module auteur_group
     .InFmtSelWidth (InFmtSelWidth),
     .ScaleFmtSelWidth (ScaleFmtSelWidth),
     .OutFmtSelWidth (OutFmtSelWidth),
-    .InputBufferTotDepth(InputBufferTotDepth)
+    .InputBufferTotDepth (InputBufferTotDepth),
+    .InputBufferDepth (InputBufferDepth),
+    .InputBufferBanks (InputBufferBanks)
   ) i_local_ctrl (
     .clk_i (clk_i),
     .rst_ni (rst_ni),
@@ -241,8 +254,8 @@ module auteur_group
 
   for (genvar x = 0; x < GroupSizeX; x++) begin : gen_x_buffers
     auteur_input_buffer #(
-      .NarrowWordWidth (DataWidth),
-      .WideWordWidth (InputBufferWideWord),
+      .NarrowWordWidth (InputBufferNarrowWordWidth),
+      .WideWordWidth (InputBufferWideWordWidth),
       .Depth (InputBufferDepth),
       .NumBanks (InputBufferBanks),
       .UseLatches (InputBufferLatches)
@@ -261,8 +274,8 @@ module auteur_group
 
   for (genvar w = 0; w < GroupSizeW; w++) begin : gen_w_buffers
     auteur_input_buffer #(
-      .NarrowWordWidth (DataWidth),
-      .WideWordWidth (InputBufferWideWord),
+      .NarrowWordWidth (WriteDataWidth),
+      .WideWordWidth (InputBufferWideWordWidth),
       .Depth (InputBufferDepth),
       .NumBanks (InputBufferBanks),
       .UseLatches (InputBufferLatches)
@@ -352,10 +365,11 @@ module auteur_group
       end
 
       auteur_output_buffer #(
-        .DataWidth (OutFmtWidth),
+        .DataWidth (OutputBufferDataWidth),
         .Depth (OutputBufferDepth),
         .NrBanks (OutputBufferBanks),
-        .BankAddrStart (1)
+        .BankAddrStart (1),
+        .NrPorts (OutputBufferNrPorts)
       ) i_output_buffer (
         .clk_i (clk_i),
         .rst_ni (rst_ni),

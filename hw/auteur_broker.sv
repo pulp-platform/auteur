@@ -10,6 +10,8 @@ module auteur_broker
   parameter int unsigned  GroupIdWidth = 1,
   parameter int unsigned  WriteDataWidth = 1,
   parameter int unsigned  ReadDataWidth = 1,
+  parameter int unsigned  InputBufferDataWidth = 1,
+  parameter int unsigned  OutputBufferDataWidth = 1,
 
   parameter int unsigned  GroupSizeX = 1,
   parameter int unsigned  GroupSizeW = 1,
@@ -18,26 +20,37 @@ module auteur_broker
   parameter int unsigned  InputBufferAddrWidth  = 1,
   parameter int unsigned  OutputBufferAddrWidth = 1,
 
-  parameter int unsigned  NrOutputBufferReqs = 1,
+  parameter bit           OutputBufferSplitReadWrite = 0,
 
-  localparam int unsigned NrOutputBuffersW = GroupSizeW/IntercoWidth,
+  localparam int unsigned NrOutputBufferChannels = OutputBufferSplitReadWrite ? 2 : 1,
+
+  localparam int unsigned NrOutputBuffersW = GroupSizeW / IntercoWidth,
+
+  localparam int unsigned NrInputBufferReqs = WriteDataWidth / InputBufferDataWidth <= (GroupSizeX + GroupSizeW) ? WriteDataWidth / InputBufferDataWidth : (GroupSizeX + GroupSizeW),
+
+  localparam int unsigned NrOutputBufferWriteReqs = WriteDataWidth / OutputBufferDataWidth <= GroupSizeX * NrOutputBuffersW ? WriteDataWidth / OutputBufferDataWidth : GroupSizeX * NrOutputBuffersW,
+  localparam int unsigned NrOutputBufferReadReqs = ReadDataWidth / OutputBufferDataWidth <= GroupSizeX * NrOutputBuffersW ?  WriteDataWidth / OutputBufferDataWidth : GroupSizeX * NrOutputBuffersW,
+  localparam int unsigned NrOutputBufferReqs = NrOutputBufferWriteReqs > NrOutputBufferReadReqs ? NrOutputBufferWriteReqs : NrOutputBufferReadReqs,
+
+  localparam int unsigned NrInputBufferBundles = (GroupSizeX + GroupSizeW) / NrInputBufferReqs,
+  localparam int unsigned NrOutputBufferBundles = GroupSizeX * NrOutputBuffersW / NrOutputBufferReqs,
 
   localparam type input_buffer_req_t = struct packed {
     logic                            valid;
     logic [InputBufferAddrWidth-1:0] addr;
-    logic [WriteDataWidth-1:0]       wdata;
+    logic [InputBufferDataWidth-1:0] wdata;
   },
 
   localparam type output_buffer_req_t = struct packed {
     logic                             valid;
     logic [OutputBufferAddrWidth-1:0] addr;
     logic                             we;
-    logic [WriteDataWidth-1:0]        wdata;
+    logic [OutputBufferDataWidth-1:0] wdata;
   },
 
   localparam type output_buffer_rsp_t = struct packed {
-    logic                      valid;
-    logic [WriteDataWidth-1:0] rdata;
+    logic                             valid;
+    logic [OutputBufferDataWidth-1:0] rdata;
   },
 
   localparam type write_req_t = struct packed {
@@ -56,23 +69,27 @@ module auteur_broker
     logic [ReadDataWidth-1:0] rdata;
   }
 ) (
-  input  logic                                                                              clk_i,
-  input  logic                                                                              rst_ni,
-  input  logic [GroupIdWidth-1:0]                                                           group_id_i,
+  input  logic                                                                                               clk_i,
+  input  logic                                                                                               rst_ni,
+  input  logic [GroupIdWidth-1:0]                                                                            group_id_i,
 
-  input  write_req_t                                                                        write_req_i,
-  output write_req_t                                                                        write_req_o,
+  input  write_req_t                                                                                         write_req_i,
+  output write_req_t                                                                                         write_req_o,
 
-  input  read_req_t                                                                         read_req_i,
-  output read_req_t                                                                         read_req_o,
-  output read_rsp_t                                                                         read_rsp_o,
-  input  read_rsp_t                                                                         read_rsp_i,
+  input  read_req_t                                                                                          read_req_i,
+  output read_req_t                                                                                          read_req_o,
+  output read_rsp_t                                                                                          read_rsp_o,
+  input  read_rsp_t                                                                                          read_rsp_i,
 
-  output input_buffer_req_t [GroupSizeX+GroupSizeW-1:0]                                     input_buffer_req_o,
+  output input_buffer_req_t [NrInputBufferBundles-1:0][NrInputBufferReqs-1:0]                                input_buffer_req_o,
 
-  output output_buffer_req_t [GroupSizeX-1:0][NrOutputBuffersW-1:0][NrOutputBufferReqs-1:0] output_buffer_req_o,
-  input  output_buffer_rsp_t [GroupSizeX-1:0][NrOutputBuffersW-1:0]                         output_buffer_rsp_i
+  output output_buffer_req_t [NrOutputBufferBundles-1:0][NrOutputBufferReqs-1:0][NrOutputBufferChannels-1:0] output_buffer_req_o,
+  input  output_buffer_rsp_t [NrOutputBufferBundles-1:0][NrOutputBufferReqs-1:0][NrOutputBufferChannels-1:0] output_buffer_rsp_i
 );
+
+  // If WriteDataWidth =/= ReadDataWidth, read or write requests may not fill an entire bundle
+  localparam int unsigned OutputBufferWriteSelWidth = $clog2(NrOutputBufferWriteReqs/NrOutputBufferReqs);
+  localparam int unsigned OutputBufferReadSelWidth = $clog2(NrOutputBufferReadReqs/NrOutputBufferReqs);
 
   logic write_is_local;
 
@@ -130,88 +147,111 @@ module auteur_broker
     end
   end
 
-
-  // Local request generation
-
+  // Local requests generation
   always_comb begin : local_requests_assignment
     input_buffer_req_o   = '0;
     output_buffer_req_o  = '0;
 
     if (write_req_i.valid) begin
       if (write_req_i.addr[WriteAddrWidth-GroupIdWidth-1]) begin
-        // Output Buffer
-        int unsigned x_sel, w_sel;
+        // Output Buffers
+        int unsigned bundle_sel, write_sel;
 
-        if (GroupSizeX != 1) begin
-          x_sel = write_req_i.addr[OutputBufferAddrWidth+$clog2(NrOutputBuffersW)+:$clog2(GroupSizeX)];
+        if (NrOutputBufferBundles != 1) begin
+          bundle_sel = write_req_i.addr[OutputBufferAddrWidth+OutputBufferWriteSelWidth+:$clog2(NrOutputBufferBundles)];
         end else begin
-          x_sel = 0;
+          bundle_sel = 0;
         end
 
-        if (NrOutputBuffersW != 1) begin
-          w_sel = write_req_i.addr[OutputBufferAddrWidth+:$clog2(NrOutputBuffersW)];
+        if (OutputBufferWriteSelWidth != 0) begin
+          write_sel = write_req_i.addr[OutputBufferAddrWidth+:OutputBufferWriteSelWidth];
         end else begin
-          w_sel = 0;
+          write_sel = 0;
         end
 
-        output_buffer_req_o[x_sel][w_sel][0] = '{
-          valid: write_req_i.valid,
-          addr:  write_req_i.addr[OutputBufferAddrWidth-1:0],
-          we:    1'b1,
-          wdata: write_req_i.wdata
-        };
+        for (int unsigned i = 0; i < NrOutputBufferReqs; i++) begin
+          // Only assert selected requests if the write channel is narrower than the read channel
+          if (i/NrOutputBufferWriteReqs == write_sel) begin
+            // Writes are always performed on channel 0
+            output_buffer_req_o[bundle_sel][i][0] = '{
+              valid: write_req_i.valid,
+              addr:  write_req_i.addr[OutputBufferAddrWidth-1:0],
+              we:    1'b1,
+              wdata: write_req_i.wdata[i*OutputBufferDataWidth+:OutputBufferDataWidth]
+            };
+          end
+        end
       end else begin
-        // Input Buffer
-        int unsigned buf_addr;
+        // Input Buffers
+        int unsigned bundle_sel;
 
-        buf_addr = write_req_i.addr[InputBufferAddrWidth+:$clog2(GroupSizeX+GroupSizeW)];
+        if (NrInputBufferBundles != 1) begin
+          bundle_sel = write_req_i.addr[InputBufferAddrWidth+:$clog2(NrInputBufferBundles)];
+        end else begin
+          bundle_sel = 0;
+        end
 
-        input_buffer_req_o[buf_addr] = '{
-          valid: write_req_i.valid,
-          addr:  write_req_i.addr[InputBufferAddrWidth-1:0],
-          wdata: write_req_i.wdata
-        };
+        for (int unsigned i = 0; i < NrInputBufferReqs; i++) begin
+          input_buffer_req_o[bundle_sel][i] = '{
+            valid: write_req_i.valid,
+            addr:  write_req_i.addr[InputBufferAddrWidth-1:0],
+            wdata: write_req_i.wdata[i*InputBufferDataWidth+:InputBufferDataWidth]
+          };
+        end
       end
     end
 
     if (read_req_i.valid) begin
       // Output Buffer
-      int unsigned x_sel, w_sel;
+      int unsigned bundle_sel, read_sel;
 
-      if (GroupSizeX != 1) begin
-        x_sel = write_req_i.addr[OutputBufferAddrWidth+$clog2(NrOutputBuffersW)+:$clog2(GroupSizeX)];
+      if (NrOutputBufferBundles != 1) begin
+        bundle_sel = read_req_i.addr[OutputBufferAddrWidth+OutputBufferReadSelWidth+:$clog2(NrOutputBufferBundles)];
       end else begin
-        x_sel = 0;
+        bundle_sel = 0;
       end
 
-      if (NrOutputBuffersW != 1) begin
-        w_sel = write_req_i.addr[OutputBufferAddrWidth+:$clog2(NrOutputBuffersW)];
+      if (OutputBufferReadSelWidth != 0) begin
+        read_sel = read_req_i.addr[OutputBufferAddrWidth+:OutputBufferReadSelWidth];
       end else begin
-        w_sel = 0;
+        read_sel = 0;
       end
 
-      output_buffer_req_o[x_sel][w_sel][NrOutputBufferReqs-1] = '{
-        valid: read_req_i.valid,
-        addr:  read_req_i.addr[OutputBufferAddrWidth-1:0],
-        we:    1'b0,
-        wdata: '0
-      };
+      for (int unsigned i = 0; i < NrOutputBufferReqs; i++) begin
+        // Only assert selected requests if the read channel is narrower than the write channel
+        if (i/NrOutputBufferReadReqs == read_sel) begin
+          // Reads can either be performed on channel 1 or 0, depending on whether the OutputBufferSplitReadWrite parameter is 1 or 0
+          output_buffer_req_o[bundle_sel][i][NrOutputBufferChannels-1] = '{
+            valid: read_req_i.valid,
+            addr:  read_req_i.addr[OutputBufferAddrWidth-1:0],
+            we:    1'b0,
+            wdata: '0
+          };
+        end
+      end
     end
   end
 
   // Local responses handling
-
   read_rsp_t local_rsp;
 
   always_comb begin : local_response_assignment
-    local_rsp = '0;
+    logic [ReadDataWidth-1:0] rsp_rdata;
 
-    for (int unsigned x = 0; x < GroupSizeX; x++) begin
-      for (int unsigned w = 0; w < NrOutputBuffersW; w++) begin
-        if (output_buffer_rsp_i[x][w].valid) begin
+    local_rsp = '0;
+    rsp_rdata = '0;
+
+    for (int unsigned i = 0; i < NrOutputBufferBundles; i++) begin
+      // We have to check for valid responses like this since reads may not fill a bundle
+      for (int unsigned s = 0; s < NrOutputBufferReqs; s += NrOutputBufferReadReqs) begin
+        if (output_buffer_rsp_i[i][s][NrOutputBufferChannels-1].valid) begin
+          for (int unsigned r = 0; r < NrOutputBufferReadReqs; r++) begin
+            rsp_rdata[r*OutputBufferDataWidth+:OutputBufferDataWidth] = output_buffer_rsp_i[i][s+r][NrOutputBufferChannels-1].rdata;
+          end
+
           local_rsp = '{
-            valid: output_buffer_rsp_i[x][w].valid,
-            rdata: output_buffer_rsp_i[x][w].rdata
+            valid: output_buffer_rsp_i[i][s][NrOutputBufferChannels-1].valid,
+            rdata: rsp_rdata
           };
         end
       end

@@ -157,14 +157,15 @@ module auteur_dotp
     if (cfg_mant_inputs_q.num_joins <= NrMaxJoins) begin
       for (int unsigned g = 0; g < NrMxGroups; g++) begin
         for (int unsigned i = 0; i < MxGroupSize; i++) begin
-          if (i % (1<<cfg_mant_inputs_q.num_joins) == 0) begin
+          // TODO: This check is probably redundant
+          // if (i % (1<<cfg_mant_inputs_q.num_joins) == 0) begin
             in_is_infinity_d[g] |= x_flags_q[g*MxGroupSize+i].is_infinity | w_flags_q[g*MxGroupSize+i].is_infinity;
             in_is_nan_d[g]      |= x_flags_q[g*MxGroupSize+i].is_nan | w_flags_q[g*MxGroupSize+i].is_nan | (x_flags_q[g*MxGroupSize+i].is_infinity & w_flags_q[g*MxGroupSize+i].is_zero) | (w_flags_q[g*MxGroupSize+i].is_infinity & x_flags_q[g*MxGroupSize+i].is_zero);
 
             in_prod_any_positive_infinity_d[g] |= (x_flags_q[g*MxGroupSize+i].is_infinity | w_flags_q[g*MxGroupSize+i].is_infinity) & (x_sign_q[g*MxGroupSize+i] == w_sign_q[g*MxGroupSize+i]);
             in_prod_any_negative_infinity_d[g] |= (x_flags_q[g*MxGroupSize+i].is_infinity | w_flags_q[g*MxGroupSize+i].is_infinity) & (x_sign_q[g*MxGroupSize+i] ^ w_sign_q[g*MxGroupSize+i]);
             in_prod_any_zero_d[g]              |= (x_flags_q[g*MxGroupSize+i].is_zero | x_flags_q[g*MxGroupSize+i].is_zero);
-          end
+          // end
         end
 
         in_is_nan_d[g] |= in_prod_any_positive_infinity_d[g] && in_prod_any_negative_infinity_d[g];
@@ -493,6 +494,26 @@ module auteur_dotp
   logic [NrMxGroups-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0]   max_in_prod_exps;
   logic [NrInMaxWidth-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] in_shifts_wrt_in_d, in_shifts_wrt_in_q;
 
+  // This function generates the table that contains the indexes of the last comparators for each formats.
+  // For example, in a format with no joins every single comparator is the last one, while in a format that requires one join only odd comparators are marked as final
+  typedef int unsigned node_table_t [NrMaxJoins:0][MaxInWidth-1:0];
+
+  function automatic node_table_t gen_max_tree_last_comp();
+    int unsigned res [NrMaxJoins:0][MaxInWidth-1:0] = '{default: MaxInWidth-1}; // MaxInWidth-1 will always be a last comparator, regardless of the format
+
+    for (int unsigned i = 0; i <= NrMaxJoins; i++) begin
+      for (int unsigned c = 0; c < MaxInWidth; c++) begin
+        if ((c+1) % (1<<i) == 0) begin
+          res[i][c] = c;
+        end
+      end
+    end
+
+    return res;
+  endfunction
+
+  localparam int unsigned MaxTreeLastComp [NrMaxJoins:0][MaxInWidth-1:0] = gen_max_tree_last_comp();
+
   // Find the maximum exponent for each MX group
   for (genvar g = 0; g < NrMxGroups; g++) begin : gen_groups_max_trees
     localparam MxGroupOffset = g*MxGroupSize;
@@ -519,8 +540,17 @@ module auteur_dotp
           // Do not even consider the carry in if this is the last comparator.
           // Without this, the synthesis tool reports a out of bounds index (even though this can't actually happen!).
           if (c != MaxInWidth-1) begin
-            assign comp_carry_in[0] = (c+1) % (1<<cfg_exp_fifo_q.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][0];
-            assign comp_carry_in[1] = (c+1) % (1<<cfg_exp_fifo_q.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][1];
+            always_comb begin : assign_comp_carry_in
+              comp_carry_in[0] = comp_carry_out[c+1][0];
+              comp_carry_in[1] = comp_carry_out[c+1][1];
+
+              for (int unsigned i = 0; i < MaxInWidth; i++) begin
+                if (c == MaxTreeLastComp[cfg_exp_fifo_q.num_joins][i]) begin
+                  comp_carry_in[0] = 1'b0;
+                  comp_carry_in[1] = 1'b0;
+                end
+              end
+            end
           end else begin
             assign comp_carry_in[0] = 1'b0;
             assign comp_carry_in[1] = 1'b0;
@@ -546,8 +576,22 @@ module auteur_dotp
         for (genvar c = 0; c < NodeWidth; c++) begin : gen_comparators
           logic [1:0] comp_carry_in;
 
-          assign comp_carry_in[0] = c == NodeWidth-1 ? s>=(NrMaxJoins-cfg_exp_fifo_q.num_joins) : (c+1) % (1<<cfg_exp_fifo_q.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][0];
-          assign comp_carry_in[1] = c == NodeWidth-1 ? 1'b0                                     : (c+1) % (1<<cfg_exp_fifo_q.num_joins) == 0 ? 1'b0 : comp_carry_out[c+1][1];
+          if (c != NodeWidth-1) begin
+            always_comb begin : assign_comp_carry_in
+              comp_carry_in[0] = comp_carry_out[c+1][0];
+              comp_carry_in[1] = comp_carry_out[c+1][1];
+
+              for (int unsigned i = 0; i < MaxInWidth; i++) begin
+                if (c == MaxTreeLastComp[cfg_exp_fifo_q.num_joins][i]) begin
+                  comp_carry_in[0] = 1'b0;
+                  comp_carry_in[1] = 1'b0;
+                end
+              end
+            end
+          end else begin
+            assign comp_carry_in[0] = s >= (NrMaxJoins-cfg_exp_fifo_q.num_joins);
+            assign comp_carry_in[1] = 1'b0;
+          end
 
           assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
           assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} <  {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
@@ -727,6 +771,25 @@ module auteur_dotp
     assign in_shifts_norm[i] = overflow ? '1 : shift_wide[ShiftAmountWidth-1:0];
   end
 
+  // Function to generate the shift adjustment table.
+  // With formats that require 1+ joins, the final shifts of the mantissa sections have to be adjusted depending on which part of the larger mantissa they represent.
+  // For example, suppose that each mantissa section has length 10 and we have a format that requires one join, the shift adjustment for the section with index 1
+  // (the most significant one) is 0, while section 0 has to be shifted by 10 additional bits.
+  typedef int unsigned adj_table_t [NrMaxJoins:0][MaxInWidth-1:0];
+
+  function automatic adj_table_t gen_adj_table();
+    int unsigned res [NrMaxJoins:0][MaxInWidth-1:0] = '{default: '0};
+
+    for (int unsigned j = 0; j < NrMaxJoins; j++) begin
+      for (int unsigned i = 0; i < MaxInWidth; i++) begin
+        res[j][i] = (MaxInWidth-i-1) % (1<<j);
+      end
+    end
+
+    return res;
+  endfunction
+
+  localparam int unsigned AdjTable [NrMaxJoins:0][MaxInWidth-1:0] = gen_adj_table();
 
   logic [NrIn-1:0][ShiftAmountWidth-1:0] in_shifts_final_d, in_shifts_final_q;
   logic                                  in_shifts_final_valid_d, in_shifts_final_valid_q;
@@ -738,7 +801,7 @@ module auteur_dotp
     logic [ShiftAmountWidth-1:0] local_shift_adj;
 
     assign {overflow,local_shift}          = in_shift + in_shifts_norm[i] + scale_shift_adj_q[i/MxGroupSize];
-    assign {overflow_adj, local_shift_adj} = local_shift + ((MaxInWidth - i - 1) % (1<<cfg_exp_max_exp_q.num_joins)) * ((InSuperFmtManBits+InManUnnorm) * 2); // Adjust the local shift if it is part of a larger mantissa
+    assign {overflow_adj, local_shift_adj} = local_shift + AdjTable[cfg_exp_max_exp_q.num_joins][i%MaxInWidth] * ((InSuperFmtManBits+InManUnnorm) * 2); // Adjust the local shift if it is part of a larger mantissa
     assign in_shifts_final_d[i]            = |overflow || overflow_adj ? '1 : local_shift_adj;
   end
 
@@ -777,29 +840,30 @@ module auteur_dotp
 
   if (SyncWithFifos) begin
     `AUTEUR_FIFO(y_sign_fifo_acc, get_input_mant_delay(PipeCfg)-YDelay                    , logic                         , y_i.sign    , y_sign_acc_q, y_valid_i               , scale_in_prod_valid_q)
-    `AUTEUR_FIFO(y_exp_fifo_acc , get_input_mant_delay(PipeCfg)-get_max_exp_delay(PipeCfg), logic [OutSuperFmtExpBits-1:0], y_i.exponent, y_exp_acc_q , maximum_exponent_valid_q, scale_in_prod_valid_q)
+    `AUTEUR_FIFO(y_exp_fifo_acc , get_input_mant_delay(PipeCfg)-get_max_exp_delay(PipeCfg), logic [OutSuperFmtExpBits-1:0], y_exp_q     , y_exp_acc_q , maximum_exponent_valid_q, scale_in_prod_valid_q)
     `AUTEUR_FIFO(y_mant_fifo_acc, get_input_mant_delay(PipeCfg)-YDelay                    , logic [OutSuperFmtManBits-1:0], y_i.mantissa, y_mant_acc_q, y_valid_i               , scale_in_prod_valid_q)
     `AUTEUR_FIFO(y_flags_fifo   , get_input_mant_delay(PipeCfg)-YDelay                    , fp_flags_t                    , y_flags_i   , y_flags_q   , y_valid_i               , scale_in_prod_valid_q)
   end else begin
     `AUTEUR_PIPE(y_sign_fifo_acc, get_input_mant_delay(PipeCfg)-YDelay                    , logic                         , y_i.sign    , y_sign_acc_q, y_valid_i               )
-    `AUTEUR_PIPE(y_exp_fifo_acc , get_input_mant_delay(PipeCfg)-get_max_exp_delay(PipeCfg), logic [OutSuperFmtExpBits-1:0], y_i.exponent, y_exp_acc_q , maximum_exponent_valid_q)
+    `AUTEUR_PIPE(y_exp_fifo_acc , get_input_mant_delay(PipeCfg)-get_max_exp_delay(PipeCfg), logic [OutSuperFmtExpBits-1:0], y_exp_q     , y_exp_acc_q , maximum_exponent_valid_q)
     `AUTEUR_PIPE(y_mant_fifo_acc, get_input_mant_delay(PipeCfg)-YDelay                    , logic [OutSuperFmtManBits-1:0], y_i.mantissa, y_mant_acc_q, y_valid_i               )
     `AUTEUR_PIPE(y_flags_fifo   , get_input_mant_delay(PipeCfg)-YDelay                    , fp_flags_t                    , y_flags_i   , y_flags_q   , y_valid_i               )
   end
 
   // FINAL ACCUMULATION
 
-  logic signed [MantAccWidth-1:0]               mant_acc_d, mant_acc_q;
+  logic signed [MantAccWidth-1:0]               mant_acc_d, mant_acc_q, y_inspect;
   logic [OutSuperFmtExpBits-1:0]                exp_acc_d, exp_acc_q;
   logic                                         acc_valid_d, acc_valid_q;
 
   logic signed [NrIn-1:0][MantAccFracWidth+4:0] scale_in_prod_mant_signed;
 
-  typedef logic [OutSuperFmtManBits:0]                             y_mant_denorm_t;
+  typedef logic [OutSuperFmtManBits+1:0]                           y_mant_signed_t;
   typedef logic [2*InSuperFmtManBits+2*MxScaleSuperFmtManBits+3:0] scale_in_prod_mant_t;
 
   always_comb begin : sum_mantissae
-    mant_acc_d = signed'({y_sign_acc_q ? {y_flags_q.is_denormal,~y_mant_acc_q}+1'b1 : {1'b0,~y_flags_q.is_denormal,y_mant_acc_q},{(AccRoundBits){1'b0}}}) >>> y_shift_q;
+    mant_acc_d = signed'({y_sign_acc_q ? {1'b1,y_flags_q.is_denormal,~y_mant_acc_q}+1'b1 : {1'b0,~y_flags_q.is_denormal,y_mant_acc_q},{(AccRoundBits){1'b0}}}) >>> y_shift_q;
+    y_inspect  = {y_sign_acc_q ? {1'b1,y_flags_q.is_denormal,~y_mant_acc_q}+1'b1 : {1'b0,~y_flags_q.is_denormal,y_mant_acc_q},{(AccRoundBits){1'b0}}} >>> y_shift_q;
 
     for (int unsigned i = 0; i < NrIn; i++) begin
       scale_in_prod_mant_signed[i] =  signed'({scale_in_prod_sign_q[i] ? ~scale_in_prod_mant_q[i]+1'b1 : {1'b0,scale_in_prod_mant_q[i]},{(MantAccFracWidth-2*InSuperFmtManBits-2*MxScaleSuperFmtManBits){1'b0}}});

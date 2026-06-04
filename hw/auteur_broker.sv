@@ -147,6 +147,12 @@ module auteur_broker
     end
   end
 
+  // We use these localparams to avoid synthesis errors in case of a log returning zero
+  localparam int unsigned OutputBufferBundleSelWidthSafe = NrOutputBufferBundles > 1 ? $clog2(NrOutputBufferBundles) : 1;
+  localparam int unsigned OutputBufferWriteSelWidthSafe  = NrOutputBufferWriteReqs/NrOutputBufferReqs > 1 ? $clog2(NrOutputBufferWriteReqs/NrOutputBufferReqs) : 1;
+  localparam int unsigned OutputBufferReadSelWidthSafe   = NrOutputBufferReadReqs/NrOutputBufferReqs > 1 ? $clog2(NrOutputBufferReadReqs/NrOutputBufferReqs) : 1;
+  localparam int unsigned InputBufferBundleSelWidthSafe  = NrInputBufferBundles > 1 ? $clog2(NrInputBufferBundles) : 1;
+
   // Local requests generation
   always_comb begin : local_requests_assignment
     input_buffer_req_o   = '0;
@@ -158,13 +164,13 @@ module auteur_broker
         int unsigned bundle_sel, write_sel;
 
         if (NrOutputBufferBundles != 1) begin
-          bundle_sel = write_req_i.addr[OutputBufferAddrWidth+OutputBufferWriteSelWidth+:$clog2(NrOutputBufferBundles)];
+          bundle_sel = write_req_i.addr[OutputBufferAddrWidth+OutputBufferWriteSelWidth+:OutputBufferBundleSelWidthSafe];
         end else begin
           bundle_sel = 0;
         end
 
         if (OutputBufferWriteSelWidth != 0) begin
-          write_sel = write_req_i.addr[OutputBufferAddrWidth+:OutputBufferWriteSelWidth];
+          write_sel = write_req_i.addr[OutputBufferAddrWidth+:OutputBufferWriteSelWidthSafe];
         end else begin
           write_sel = 0;
         end
@@ -186,7 +192,7 @@ module auteur_broker
         int unsigned bundle_sel;
 
         if (NrInputBufferBundles != 1) begin
-          bundle_sel = write_req_i.addr[InputBufferAddrWidth+:$clog2(NrInputBufferBundles)];
+          bundle_sel = write_req_i.addr[InputBufferAddrWidth+:InputBufferBundleSelWidthSafe];
         end else begin
           bundle_sel = 0;
         end
@@ -206,13 +212,13 @@ module auteur_broker
       int unsigned bundle_sel, read_sel;
 
       if (NrOutputBufferBundles != 1) begin
-        bundle_sel = read_req_i.addr[OutputBufferAddrWidth+OutputBufferReadSelWidth+:$clog2(NrOutputBufferBundles)];
+        bundle_sel = read_req_i.addr[OutputBufferAddrWidth+OutputBufferReadSelWidth+:OutputBufferBundleSelWidthSafe];
       end else begin
         bundle_sel = 0;
       end
 
       if (OutputBufferReadSelWidth != 0) begin
-        read_sel = read_req_i.addr[OutputBufferAddrWidth+:OutputBufferReadSelWidth];
+        read_sel = read_req_i.addr[OutputBufferAddrWidth+:OutputBufferReadSelWidthSafe];
       end else begin
         read_sel = 0;
       end

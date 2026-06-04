@@ -557,7 +557,7 @@ module auteur_dotp
           end
 
           assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} >= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};
-          assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} <  {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};
+          assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} <= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};
 
           assign max_in_prod_exps_tree_stages[s+1][n>>1][c] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} >= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]} ? max_in_prod_exps_tree_stages[s][n][c] : max_in_prod_exps_tree_stages[s][n+1][c];
         end
@@ -594,7 +594,7 @@ module auteur_dotp
           end
 
           assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
-          assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} <  {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
+          assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} <= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
 
           assign max_in_prod_exps_narrow_tree_stages[s+1][n+c]           = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]} ? max_in_prod_exps_narrow_tree_stages[s][n+c] : max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c];
           assign max_in_prod_exps_narrow_tree_stages[s+1][n+NodeWidth+c] = s>=(NrMaxJoins-cfg_exp_fifo_q.num_joins) ? max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c] : max_in_prod_exps_narrow_tree_stages[s+1][n+c];
@@ -745,7 +745,7 @@ module auteur_dotp
 
   for (genvar i = 0; i < NrIn; i++) begin : normalize_input_shifts
     logic [$clog2(NrIn)-1:0]               fmt_start;
-    logic [NrMaxJoins-1:0]                 fmt_width;
+    logic [NrMaxJoins:0]                   fmt_width;
 
     logic [MaxInWidth*InSuperFmtExpBits:0] shift_wide;
     logic                                  overflow;
@@ -780,7 +780,7 @@ module auteur_dotp
   function automatic adj_table_t gen_adj_table();
     int unsigned res [NrMaxJoins:0][MaxInWidth-1:0] = '{default: '0};
 
-    for (int unsigned j = 0; j < NrMaxJoins; j++) begin
+    for (int unsigned j = 0; j < NrMaxJoins+1; j++) begin
       for (int unsigned i = 0; i < MaxInWidth; i++) begin
         res[j][i] = (MaxInWidth-i-1) % (1<<j);
       end
@@ -863,7 +863,6 @@ module auteur_dotp
 
   always_comb begin : sum_mantissae
     mant_acc_d = signed'({y_sign_acc_q ? {1'b1,y_flags_q.is_denormal,~y_mant_acc_q}+1'b1 : {1'b0,~y_flags_q.is_denormal,y_mant_acc_q},{(AccRoundBits){1'b0}}}) >>> y_shift_q;
-    y_inspect  = {y_sign_acc_q ? {1'b1,y_flags_q.is_denormal,~y_mant_acc_q}+1'b1 : {1'b0,~y_flags_q.is_denormal,y_mant_acc_q},{(AccRoundBits){1'b0}}} >>> y_shift_q;
 
     for (int unsigned i = 0; i < NrIn; i++) begin
       scale_in_prod_mant_signed[i] =  signed'({scale_in_prod_sign_q[i] ? ~scale_in_prod_mant_q[i]+1'b1 : {1'b0,scale_in_prod_mant_q[i]},{(MantAccFracWidth-2*InSuperFmtManBits-2*MxScaleSuperFmtManBits){1'b0}}});
@@ -951,7 +950,7 @@ module auteur_dotp
 
   assign final_mant_pre_round = mant_acc_lz < MantAccIntWidth ? mant_acc_unsigned >> (MantAccIntWidth - 1 - mant_acc_lz) : mant_acc_unsigned << (mant_acc_lz - MantAccIntWidth + 1);
   //assign final_mant_d         = (maximum_exponent_overflow_q || final_exp_overflow) ? '0 : final_mant_pre_round[OutSuperFmtManBits:AccRoundBits] + final_mant_pre_round[AccRoundBits-1];
-  assign final_mant_d         = final_mant_pre_round[OutSuperFmtManBits:AccRoundBits] + final_mant_pre_round[AccRoundBits-1];
+  assign final_mant_d         = final_mant_pre_round[OutSuperFmtManBits+AccRoundBits-1:AccRoundBits] + final_mant_pre_round[AccRoundBits-1];
 
   assign final_sign_d         = mant_acc_q[MantAccWidth-1];
 

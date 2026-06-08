@@ -12,36 +12,36 @@ package auteur_pkg;
     int unsigned required_joins;
   } fp_encoding_t;
 
-  typedef struct {
-    struct {
-      struct {
-        int unsigned inputs;
-        int unsigned input_products;
-        int unsigned scale_input_products;
+  typedef struct packed {
+    struct packed {
+      struct packed {
+        logic [31:0] inputs;
+        logic [31:0] input_products;
+        logic [31:0] scale_input_products;
       } mantissa_path;
 
-      struct {
-        int unsigned inputs;
-        int unsigned input_products;
-        int unsigned maximum_exponent;
-        int unsigned final_shifts;
+      struct packed {
+        logic [31:0] inputs;
+        logic [31:0] input_products;
+        logic [31:0] maximum_exponent;
+        logic [31:0] final_shifts;
       } exponent_path;
     } input_path;
 
-    struct {
-      struct {
-        int unsigned inputs;
-        int unsigned scale_product;
+    struct packed {
+      struct packed {
+        logic [31:0] inputs;
+        logic [31:0] scale_product;
       } mantissa_path;
 
-      struct {
-        int unsigned inputs;
-        int unsigned scale_product;
+      struct packed {
+        logic [31:0] inputs;
+        logic [31:0] scale_product;
       } exponent_path;
     } scale_path;
 
-    int unsigned accumulation;
-    int unsigned normalization;
+    logic [31:0] accumulation;
+    logic [31:0] normalization;
   } dotp_pipe_cfg_t;
 
   typedef struct packed {

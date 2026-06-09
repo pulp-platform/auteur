@@ -31,7 +31,15 @@ module auteur_ce
   parameter int unsigned    NrOutFormats = 1,
   parameter fp_encoding_t   OutFpEncoding [NrOutFormats-1:0] = '{default: '0},
 
-  localparam int unsigned MaxInWidth   = 1<<NrMaxJoins,
+  localparam int unsigned MaxInWidth     = 1<<NrMaxJoins,
+  localparam int unsigned InPackWidth    = MaxInWidth * (1 + InSuperFmtExpBits + InSuperFmtManBits + InManUnnorm),
+  localparam int unsigned ScalePackWidth = (1 + MxScaleSuperFmtExpBits + MxScaleSuperFmtManBits),
+  localparam int unsigned OutPackWidth   = (1 + OutSuperFmtExpBits + OutSuperFmtManBits),
+
+  parameter logic [InPackWidth-1:0][NrInFormats-1:0][31:0]       InFormatMapTable = '{default: '0},
+  parameter logic [ScalePackWidth-1:0][NrScaleFormats-1:0][31:0] ScaleFormatMapTable = '{default: '0},
+  parameter logic [OutPackWidth-1:0][NrOutFormats-1:0][31:0]     OutFormatMapTable = '{default: '0},
+
   localparam int unsigned NrMxGroups   = NrIn/MxGroupSize,
   localparam int unsigned NrInMaxWidth = NrIn>>NrMaxJoins,
 
@@ -101,7 +109,8 @@ module auteur_ce
     .InFpEncoding (InFpEncoding),
     .OutFmtManBits (InSuperFmtManBits),
     .OutFmtExpBits (InSuperFmtExpBits),
-    .OutManUnnorm (InManUnnorm)
+    .OutManUnnorm (InManUnnorm),
+    .FormatMapTable (InFormatMapTable)
   ) i_x_packer (
     .in_i (x_i),
     .in_fmt_i (cfg_i.in_fmt),
@@ -117,7 +126,8 @@ module auteur_ce
     .InFpEncoding (InFpEncoding),
     .OutFmtManBits (InSuperFmtManBits),
     .OutFmtExpBits (InSuperFmtExpBits),
-    .OutManUnnorm (InManUnnorm)
+    .OutManUnnorm (InManUnnorm),
+    .FormatMapTable (InFormatMapTable)
   ) i_w_packer (
     .in_i (w_i),
     .in_fmt_i (cfg_i.in_fmt),
@@ -133,7 +143,8 @@ module auteur_ce
     .InFpEncoding (ScaleFpEncoding),
     .OutFmtManBits (MxScaleSuperFmtManBits),
     .OutFmtExpBits (MxScaleSuperFmtExpBits),
-    .OutManUnnorm (0)
+    .OutManUnnorm (0),
+    .FormatMapTable (ScaleFormatMapTable)
   ) i_x_scale_packer (
     .in_i (x_scale_i),
     .in_fmt_i (cfg_i.scale_fmt),
@@ -149,7 +160,8 @@ module auteur_ce
     .InFpEncoding (ScaleFpEncoding),
     .OutFmtManBits (MxScaleSuperFmtManBits),
     .OutFmtExpBits (MxScaleSuperFmtExpBits),
-    .OutManUnnorm (0)
+    .OutManUnnorm (0),
+    .FormatMapTable (ScaleFormatMapTable)
   ) i_w_scale_packer (
     .in_i (w_scale_i),
     .in_fmt_i (cfg_i.scale_fmt),
@@ -165,7 +177,8 @@ module auteur_ce
     .InFpEncoding (OutFpEncoding),
     .OutFmtManBits (OutSuperFmtManBits),
     .OutFmtExpBits (OutSuperFmtExpBits),
-    .OutManUnnorm (0)
+    .OutManUnnorm (0),
+    .FormatMapTable (OutFormatMapTable)
   ) i_y_packer (
     .in_i (y_i),
     .in_fmt_i (cfg_i.out_fmt),

@@ -852,7 +852,7 @@ module auteur_dotp
 
   // FINAL ACCUMULATION
 
-  logic signed [MantAccWidth-1:0]               mant_acc_d, mant_acc_q, y_inspect;
+  logic signed [MantAccWidth-1:0]               mant_acc_d, mant_acc_q;
   logic [OutSuperFmtExpBits-1:0]                exp_acc_d, exp_acc_q;
   logic                                         acc_valid_d, acc_valid_q;
 

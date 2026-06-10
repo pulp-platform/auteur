@@ -36,6 +36,15 @@ module auteur_group
   parameter int unsigned    NrOutFormats = 1,
   parameter fp_encoding_t   OutFpEncoding [NrOutFormats-1:0] = '{default: '0},
 
+  localparam int unsigned MaxInWidth     = 1<<NrMaxJoins,
+  localparam int unsigned InPackWidth    = MaxInWidth * (1 + InSuperFmtExpBits + InSuperFmtManBits + InManUnnorm),
+  localparam int unsigned ScalePackWidth = (1 + MxScaleSuperFmtExpBits + MxScaleSuperFmtManBits),
+  localparam int unsigned OutPackWidth   = (1 + OutSuperFmtExpBits + OutSuperFmtManBits),
+
+  parameter logic [InPackWidth-1:0][NrInFormats-1:0][31:0]       InFormatMapTable = '{default: '0},
+  parameter logic [ScalePackWidth-1:0][NrScaleFormats-1:0][31:0] ScaleFormatMapTable = '{default: '0},
+  parameter logic [OutPackWidth-1:0][NrOutFormats-1:0][31:0]     OutFormatMapTable = '{default: '0},
+
   parameter int unsigned    OutputBufferDepth = 1,
   parameter int unsigned    OutputBufferBanks = 2,
   // Whether the Read and Write requests should be made using two separate channels, allowing concurrent read and writes
@@ -340,7 +349,10 @@ module auteur_group
           .NrScaleFormats (NrScaleFormats),
           .ScaleFpEncoding (ScaleFpEncoding),
           .NrOutFormats (NrOutFormats),
-          .OutFpEncoding (OutFpEncoding)
+          .OutFpEncoding (OutFpEncoding),
+          .InFormatMapTable (InFormatMapTable),
+          .ScaleFormatMapTable (ScaleFormatMapTable),
+          .OutFormatMapTable (OutFormatMapTable)
         ) i_ce (
           .clk_i (clk_i),
           .rst_ni (rst_ni),

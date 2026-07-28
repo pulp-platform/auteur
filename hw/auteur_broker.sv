@@ -15,7 +15,7 @@ module auteur_broker
 
   parameter int unsigned  GroupSizeX = 1,
   parameter int unsigned  GroupSizeW = 1,
-  parameter int unsigned  IntercoWidth = 1,
+  parameter int unsigned  NrCesPerOutputBuffer = 1,
 
   parameter int unsigned  InputBufferAddrWidth  = 1,
   parameter int unsigned  OutputBufferAddrWidth = 1,
@@ -24,7 +24,7 @@ module auteur_broker
 
   localparam int unsigned NrOutputBufferChannels = OutputBufferSplitReadWrite ? 2 : 1,
 
-  localparam int unsigned NrOutputBuffersW = GroupSizeW / IntercoWidth,
+  localparam int unsigned NrOutputBuffersW = GroupSizeW / NrCesPerOutputBuffer,
 
   localparam int unsigned NrInputBufferReqs = WriteDataWidth / InputBufferDataWidth <= (GroupSizeX + GroupSizeW) ? WriteDataWidth / InputBufferDataWidth : (GroupSizeX + GroupSizeW),
 

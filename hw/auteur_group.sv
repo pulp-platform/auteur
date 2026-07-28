@@ -12,20 +12,20 @@ module auteur_group
   parameter int unsigned    GroupIdWidth = 1,
   parameter int unsigned    GroupSizeX = 1,
   parameter int unsigned    GroupSizeW = 1,
-  parameter int unsigned    IntercoWidth = 1,
+  parameter int unsigned    NrCesPerOutputBuffer = 1,
 
   parameter int unsigned    BaseInFmtWidth = 1,
   parameter int unsigned    ScaleFmtWidth = 1,
   parameter int unsigned    OutFmtWidth = 1,
   parameter int unsigned    NrIn = 1,
   parameter int unsigned    NrMaxJoins = 0,
-  parameter int unsigned    MxGroupSize = NrIn,
+  parameter int unsigned    BlockSize = NrIn,
   parameter int unsigned    InSuperFmtManBits = 1,
   parameter int unsigned    InSuperFmtExpBits = 1,
   parameter int unsigned    OutSuperFmtManBits = 1,
   parameter int unsigned    OutSuperFmtExpBits = 1,
-  parameter int unsigned    MxScaleSuperFmtManBits = 1,
-  parameter int unsigned    MxScaleSuperFmtExpBits = 1,
+  parameter int unsigned    ScaleSuperFmtManBits = 1,
+  parameter int unsigned    ScaleSuperFmtExpBits = 1,
   parameter bit             InManUnnorm = 0,
   parameter int unsigned    AccRoundBits = 1,
   parameter dotp_pipe_cfg_t PipeCfg = '{default: '0},
@@ -38,7 +38,7 @@ module auteur_group
 
   localparam int unsigned MaxInWidth     = 1<<NrMaxJoins,
   localparam int unsigned InPackWidth    = MaxInWidth * (1 + InSuperFmtExpBits + InSuperFmtManBits + InManUnnorm),
-  localparam int unsigned ScalePackWidth = (1 + MxScaleSuperFmtExpBits + MxScaleSuperFmtManBits),
+  localparam int unsigned ScalePackWidth = (1 + ScaleSuperFmtExpBits + ScaleSuperFmtManBits),
   localparam int unsigned OutPackWidth   = (1 + OutSuperFmtExpBits + OutSuperFmtManBits),
 
   parameter logic [InPackWidth-1:0][NrInFormats-1:0][31:0]       InFormatMapTable = '{default: '0},
@@ -47,7 +47,7 @@ module auteur_group
 
   parameter int unsigned    OutputBufferDepth = 1,
   parameter int unsigned    OutputBufferBanks = 2,
-  // Whether the Read and Write requests should be made using two separate channels, allowing concurrent read and writes
+  // Whether the Read and Write requests should be made using two separate channels, allowing concurrent reads and writes
   parameter bit             OutputBufferSplitReadWrite = 0,
 
   parameter int unsigned    InputBufferTotDepth = 1,
@@ -55,19 +55,19 @@ module auteur_group
   parameter int unsigned    InputBufferBanks = 2,
   parameter bit             InputBufferLatches = 0,
 
-  localparam int unsigned NrMxGroups = NrIn/MxGroupSize,
+  localparam int unsigned NrBlocks = NrIn/BlockSize,
 
-  localparam int unsigned OutputBufferDataWidth = OutFmtWidth*IntercoWidth,
+  localparam int unsigned OutputBufferDataWidth = OutFmtWidth*NrCesPerOutputBuffer,
 
-  localparam int unsigned InputBufferWideWordWidth = NrIn * BaseInFmtWidth + NrMxGroups * ScaleFmtWidth,
+  localparam int unsigned InputBufferWideWordWidth = NrIn * BaseInFmtWidth + NrBlocks * ScaleFmtWidth,
 
   localparam int unsigned OutputBufferAddrWidth = OutputBufferDepth > 1 ? $clog2(OutputBufferDepth) : 1,
   localparam int unsigned InputBufferWideAddrWidth = InputBufferDepth > 1 ? $clog2(InputBufferDepth) : 1,
 
-  localparam int unsigned NrOutputBuffersW = GroupSizeW / IntercoWidth,
+  localparam int unsigned NrOutputBuffersW = GroupSizeW / NrCesPerOutputBuffer,
 
-  localparam int unsigned OutputBufferSize = GroupSizeX * GroupSizeW * OutputBufferDepth * OutputBufferBanks / IntercoWidth,
-  localparam int unsigned InputBufferSize  = 2 * (GroupSizeX + GroupSizeW) * InputBufferBanks * InputBufferDepth * InputBufferWideWordWidth / WriteDataWidth / IntercoWidth,
+  localparam int unsigned OutputBufferSize = GroupSizeX * GroupSizeW * OutputBufferDepth * OutputBufferBanks / NrCesPerOutputBuffer,
+  localparam int unsigned InputBufferSize  = 2 * (GroupSizeX + GroupSizeW) * InputBufferBanks * InputBufferDepth * InputBufferWideWordWidth / WriteDataWidth / NrCesPerOutputBuffer,
 
   localparam int unsigned InFmtSelWidth = NrInFormats > 1 ? $clog2(NrInFormats) : 1,
   localparam int unsigned ScaleFmtSelWidth = NrScaleFormats > 1 ? $clog2(NrScaleFormats) : 1,
@@ -175,7 +175,7 @@ module auteur_group
     .OutputBufferDataWidth (OutputBufferDataWidth),
     .GroupSizeX (GroupSizeX),
     .GroupSizeW (GroupSizeW),
-    .IntercoWidth (IntercoWidth),
+    .NrCesPerOutputBuffer (NrCesPerOutputBuffer),
     .InputBufferAddrWidth (InputBufferNarrowAddrWidth),
     .OutputBufferAddrWidth (OutputBufferAddrWidth),
     .OutputBufferSplitReadWrite (OutputBufferSplitReadWrite)
@@ -236,8 +236,8 @@ module auteur_group
   logic [GroupSizeX-1:0][NrIn*BaseInFmtWidth-1:0] x_buf;
   logic [GroupSizeW-1:0][NrIn*BaseInFmtWidth-1:0] w_buf;
 
-  logic [GroupSizeX-1:0][NrMxGroups-1:0][ScaleFmtWidth-1:0] x_scale_buf;
-  logic [GroupSizeW-1:0][NrMxGroups-1:0][ScaleFmtWidth-1:0] w_scale_buf;
+  logic [GroupSizeX-1:0][NrBlocks-1:0][ScaleFmtWidth-1:0] x_scale_buf;
+  logic [GroupSizeW-1:0][NrBlocks-1:0][ScaleFmtWidth-1:0] w_scale_buf;
 
   input_buffer_wide_req_t x_write_req, x_read_req, w_write_req, w_read_req;
 
@@ -303,8 +303,8 @@ module auteur_group
 
   for (genvar x = 0; x < GroupSizeX; x++) begin : gen_rows
     for (genvar w = 0; w < NrOutputBuffersW; w++) begin : gen_columns
-      logic [IntercoWidth-1:0][OutFmtWidth-1:0] y_ce, z_ce;
-      logic [IntercoWidth-1:0]                  z_ce_valid;
+      logic [NrCesPerOutputBuffer-1:0][OutFmtWidth-1:0] y_ce, z_ce;
+      logic [NrCesPerOutputBuffer-1:0]                  z_ce_valid;
 
       output_buffer_req_t buf_req_ce_read, buf_req_ce_write;
       output_buffer_rsp_t buf_rsp_ce_read, buf_rsp_ce_write;
@@ -325,20 +325,20 @@ module auteur_group
 
       assign y_ce = bias_en ? buf_rsp_ce_read.rdata : '0;
 
-      for (genvar i = 0; i < IntercoWidth; i++) begin : gen_local_ces
+      for (genvar i = 0; i < NrCesPerOutputBuffer; i++) begin : gen_local_ces
         auteur_ce #(
           .BaseInFmtWidth (BaseInFmtWidth),
           .ScaleFmtWidth (ScaleFmtWidth),
           .OutFmtWidth (OutFmtWidth),
           .NrIn (NrIn),
           .NrMaxJoins (NrMaxJoins),
-          .MxGroupSize (MxGroupSize),
+          .BlockSize (BlockSize),
           .InSuperFmtManBits (InSuperFmtManBits),
           .InSuperFmtExpBits (InSuperFmtExpBits),
           .OutSuperFmtManBits (OutSuperFmtManBits),
           .OutSuperFmtExpBits (OutSuperFmtExpBits),
-          .MxScaleSuperFmtManBits (MxScaleSuperFmtManBits),
-          .MxScaleSuperFmtExpBits (MxScaleSuperFmtExpBits),
+          .ScaleSuperFmtManBits (ScaleSuperFmtManBits),
+          .ScaleSuperFmtExpBits (ScaleSuperFmtExpBits),
           .InManUnnorm (InManUnnorm),
           .AccRoundBits (AccRoundBits),
           .YDelay (0),
@@ -360,10 +360,10 @@ module auteur_group
           .cfg_i (fmt_cfg),
           .in_valid_i (data_valid),
           .x_i (x_buf[x]),
-          .w_i (w_buf[w*IntercoWidth+i]),
+          .w_i (w_buf[w*NrCesPerOutputBuffer+i]),
           .scale_valid_i (data_valid),
           .x_scale_i (x_scale_buf[x]),
-          .w_scale_i (w_scale_buf[w*IntercoWidth+i]),
+          .w_scale_i (w_scale_buf[w*NrCesPerOutputBuffer+i]),
           .y_valid_i (data_valid),
           .y_i (y_ce[i]),
           .z_valid_o (z_ce_valid[i]),

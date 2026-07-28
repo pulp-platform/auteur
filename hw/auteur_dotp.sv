@@ -9,13 +9,13 @@ module auteur_dotp
 #(
   parameter int unsigned    NrIn = 1,
   parameter int unsigned    NrMaxJoins = 1,
-  parameter int unsigned    MxGroupSize = NrIn,
+  parameter int unsigned    BlockSize = NrIn,
   parameter int unsigned    InSuperFmtManBits = 1,
   parameter int unsigned    InSuperFmtExpBits = 1,
   parameter int unsigned    OutSuperFmtManBits = 1,
   parameter int unsigned    OutSuperFmtExpBits = 1,
-  parameter int unsigned    MxScaleSuperFmtManBits = 1,
-  parameter int unsigned    MxScaleSuperFmtExpBits = 1,
+  parameter int unsigned    ScaleSuperFmtManBits = 1,
+  parameter int unsigned    ScaleSuperFmtExpBits = 1,
   // Indicates that the input mantissae include the explicit leading 1 (i.e., they are unnormalized).
   // This is useful when combining two narrow formats whose combined explicit mantissa bits are insufficient to fill the mantissa of a wider target format.
   // As an example, expanding two E2M1 inputs into one E4M3 format requires these explicit leading 1s to fill the target mantissa.
@@ -28,7 +28,7 @@ module auteur_dotp
   // Only use this option if the number of pipeline stages is very high and the paths are significantly unbalanced.
   parameter bit             SyncWithFifos = 0,
 
-  localparam int unsigned   NrMxScales = NrIn/MxGroupSize,
+  localparam int unsigned   NrBlocks = NrIn/BlockSize,
 
   localparam type in_super_fmt_t = struct packed {
     logic                                     sign;
@@ -40,39 +40,39 @@ module auteur_dotp
     logic [OutSuperFmtExpBits-1:0] exponent;
     logic [OutSuperFmtManBits-1:0] mantissa;
   },
-  localparam type mx_scale_super_fmt_t = struct packed {
-    logic                              sign;
-    logic [MxScaleSuperFmtExpBits-1:0] exponent;
-    logic [MxScaleSuperFmtManBits-1:0] mantissa;
+  localparam type scale_super_fmt_t = struct packed {
+    logic                            sign;
+    logic [ScaleSuperFmtExpBits-1:0] exponent;
+    logic [ScaleSuperFmtManBits-1:0] mantissa;
   },
   localparam type dotp_cfg_t = struct packed {
     logic [$clog2(NrMaxJoins):0] num_joins;
   }
 ) (
-  input  logic                                 clk_i,
-  input  logic                                 rst_ni,
+  input  logic                            clk_i,
+  input  logic                            rst_ni,
 
-  input  dotp_cfg_t                            cfg_i,
+  input  dotp_cfg_t                       cfg_i,
 
-  input  logic                                 in_valid_i,
-  input  in_super_fmt_t [NrIn-1:0]             x_i,
-  input  in_super_fmt_t [NrIn-1:0]             w_i,
-  input  fp_flags_t [NrIn-1:0]                 x_flags_i,
-  input  fp_flags_t [NrIn-1:0]                 w_flags_i,
+  input  logic                            in_valid_i,
+  input  in_super_fmt_t [NrIn-1:0]        x_i,
+  input  in_super_fmt_t [NrIn-1:0]        w_i,
+  input  fp_flags_t [NrIn-1:0]            x_flags_i,
+  input  fp_flags_t [NrIn-1:0]            w_flags_i,
 
-  input  logic                                 y_valid_i,
-  input  out_super_fmt_t                       y_i,
-  input  fp_flags_t                            y_flags_i,
+  input  logic                            y_valid_i,
+  input  out_super_fmt_t                  y_i,
+  input  fp_flags_t                       y_flags_i,
 
-  input  logic                                 scale_valid_i,
-  input  mx_scale_super_fmt_t [NrMxScales-1:0] x_scale_i,
-  input  mx_scale_super_fmt_t [NrMxScales-1:0] w_scale_i,
-  input  fp_flags_t [NrMxScales-1:0]           x_scale_flags_i,
-  input  fp_flags_t [NrMxScales-1:0]           w_scale_flags_i,
+  input  logic                            scale_valid_i,
+  input  scale_super_fmt_t [NrBlocks-1:0] x_scale_i,
+  input  scale_super_fmt_t [NrBlocks-1:0] w_scale_i,
+  input  fp_flags_t [NrBlocks-1:0]        x_scale_flags_i,
+  input  fp_flags_t [NrBlocks-1:0]        w_scale_flags_i,
 
-  output logic                                 out_valid_o,
-  output out_super_fmt_t                       z_o,
-  output fp_flags_t                            z_flags_o
+  output logic                            out_valid_o,
+  output out_super_fmt_t                  z_o,
+  output fp_flags_t                       z_flags_o
 );
   localparam int unsigned MantAccFracWidth = OutSuperFmtManBits + AccRoundBits;
   localparam int unsigned MantAccIntWidth  = $clog2(NrIn+1) + 3 + 1; // Maximum possible number of carry bits + largest mantissa overflow + implicit 1
@@ -80,8 +80,7 @@ module auteur_dotp
   localparam int unsigned ShiftAmountWidth = $clog2(3+1+MantAccFracWidth);
   localparam int unsigned MaxInWidth       = 1<<NrMaxJoins;
   localparam int unsigned NrInMaxWidth     = NrIn>>NrMaxJoins;
-  localparam int unsigned NrMxGroups       = NrIn/MxGroupSize;
-  localparam int unsigned MxGroupSizeMax   = MxGroupSize>>NrMaxJoins;
+  localparam int unsigned BlockSizeMax     = BlockSize>>NrMaxJoins;
 
   localparam int unsigned OutSuperFmtBias = (1<<(OutSuperFmtExpBits-1)) - 1;
 
@@ -105,13 +104,13 @@ module auteur_dotp
         in_valid_exp_d, in_valid_exp_q;
 
   for (genvar i = 0; i < NrIn; i++) begin : assign_pipe_inputs
-    assign x_sign_d[i]             = x_i[i].sign;
-    assign x_exp_d[i]              = x_i[i].exponent;
-    assign x_mant_d[i]             = x_i[i].mantissa;
+    assign x_sign_d[i] = x_i[i].sign;
+    assign x_exp_d[i]  = x_i[i].exponent;
+    assign x_mant_d[i] = x_i[i].mantissa;
 
-    assign w_sign_d[i]             = w_i[i].sign;
-    assign w_exp_d[i]              = w_i[i].exponent;
-    assign w_mant_d[i]             = w_i[i].mantissa;
+    assign w_sign_d[i] = w_i[i].sign;
+    assign w_exp_d[i]  = w_i[i].exponent;
+    assign w_mant_d[i] = w_i[i].mantissa;
   end
 
   assign x_flags_d = x_flags_i;
@@ -141,11 +140,11 @@ module auteur_dotp
   `AUTEUR_PIPE_VALID(in_valid_exp_pipe , PipeCfg.input_path.exponent_path.inputs, in_valid_exp_d , in_valid_exp_q )
 
 
-  logic [NrMxGroups-1:0] in_is_infinity_d, in_is_infinity_q,
-                         in_is_nan_d, in_is_nan_q;
+  logic [NrBlocks-1:0]  in_is_infinity_d, in_is_infinity_q,
+                        in_is_nan_d, in_is_nan_q;
 
-  logic [NrMxGroups-1:0] in_prod_any_positive_infinity_d, in_prod_any_negative_infinity_d, in_prod_any_positive_infinity_q, in_prod_any_negative_infinity_q,
-                         in_prod_any_zero_d, in_prod_any_zero_q;
+  logic [NrBlocks-1:0]  in_prod_any_positive_infinity_d, in_prod_any_negative_infinity_d, in_prod_any_positive_infinity_q, in_prod_any_negative_infinity_q,
+                        in_prod_any_zero_d, in_prod_any_zero_q;
 
   always_comb begin : detect_input_exceptions
     in_is_infinity_d                = '0;
@@ -155,29 +154,26 @@ module auteur_dotp
     in_prod_any_zero_d              = '0;
 
     if (cfg_mant_inputs_q.num_joins <= NrMaxJoins) begin
-      for (int unsigned g = 0; g < NrMxGroups; g++) begin
-        for (int unsigned i = 0; i < MxGroupSize; i++) begin
-          // TODO: This check is probably redundant
-          // if (i % (1<<cfg_mant_inputs_q.num_joins) == 0) begin
-            in_is_infinity_d[g] |= x_flags_q[g*MxGroupSize+i].is_infinity | w_flags_q[g*MxGroupSize+i].is_infinity;
-            in_is_nan_d[g]      |= x_flags_q[g*MxGroupSize+i].is_nan | w_flags_q[g*MxGroupSize+i].is_nan | (x_flags_q[g*MxGroupSize+i].is_infinity & w_flags_q[g*MxGroupSize+i].is_zero) | (w_flags_q[g*MxGroupSize+i].is_infinity & x_flags_q[g*MxGroupSize+i].is_zero);
+      for (int unsigned b = 0; b < NrBlocks; b++) begin
+        for (int unsigned e = 0; e < BlockSize; e++) begin
+          in_is_infinity_d[b] |= x_flags_q[b*BlockSize+e].is_infinity | w_flags_q[b*BlockSize+e].is_infinity;
+          in_is_nan_d[b]      |= x_flags_q[b*BlockSize+e].is_nan | w_flags_q[b*BlockSize+e].is_nan | (x_flags_q[b*BlockSize+e].is_infinity & w_flags_q[b*BlockSize+e].is_zero) | (w_flags_q[b*BlockSize+e].is_infinity & x_flags_q[b*BlockSize+e].is_zero);
 
-            in_prod_any_positive_infinity_d[g] |= (x_flags_q[g*MxGroupSize+i].is_infinity | w_flags_q[g*MxGroupSize+i].is_infinity) & (x_sign_q[g*MxGroupSize+i] == w_sign_q[g*MxGroupSize+i]);
-            in_prod_any_negative_infinity_d[g] |= (x_flags_q[g*MxGroupSize+i].is_infinity | w_flags_q[g*MxGroupSize+i].is_infinity) & (x_sign_q[g*MxGroupSize+i] ^ w_sign_q[g*MxGroupSize+i]);
-            in_prod_any_zero_d[g]              |= (x_flags_q[g*MxGroupSize+i].is_zero | x_flags_q[g*MxGroupSize+i].is_zero);
-          // end
+          in_prod_any_positive_infinity_d[b] |= (x_flags_q[b*BlockSize+e].is_infinity | w_flags_q[b*BlockSize+e].is_infinity) & (x_sign_q[b*BlockSize+e] == w_sign_q[b*BlockSize+e]);
+          in_prod_any_negative_infinity_d[b] |= (x_flags_q[b*BlockSize+e].is_infinity | w_flags_q[b*BlockSize+e].is_infinity) & (x_sign_q[b*BlockSize+e] ^ w_sign_q[b*BlockSize+e]);
+          in_prod_any_zero_d[b]              |= (x_flags_q[b*BlockSize+e].is_zero | x_flags_q[b*BlockSize+e].is_zero);
         end
 
-        in_is_nan_d[g] |= in_prod_any_positive_infinity_d[g] && in_prod_any_negative_infinity_d[g];
+        in_is_nan_d[b] |= in_prod_any_positive_infinity_d[b] && in_prod_any_negative_infinity_d[b];
       end
     end
   end
 
-  `AUTEUR_PIPE(in_is_infinity_pipe               , get_input_flags_delay(PipeCfg), logic [NrMxGroups-1:0], in_is_infinity_d               , in_is_infinity_q               , in_valid_mant_q)
-  `AUTEUR_PIPE(in_is_nan_pipe                    , get_input_flags_delay(PipeCfg), logic [NrMxGroups-1:0], in_is_nan_d                    , in_is_nan_q                    , in_valid_mant_q)
-  `AUTEUR_PIPE(in_prod_any_positive_infinity_pipe, get_input_flags_delay(PipeCfg), logic [NrMxGroups-1:0], in_prod_any_positive_infinity_d, in_prod_any_positive_infinity_q, in_valid_mant_q)
-  `AUTEUR_PIPE(in_prod_any_negative_infinity_pipe, get_input_flags_delay(PipeCfg), logic [NrMxGroups-1:0], in_prod_any_negative_infinity_d, in_prod_any_negative_infinity_q, in_valid_mant_q)
-  `AUTEUR_PIPE(in_prod_any_zero_pipe             , get_input_flags_delay(PipeCfg), logic [NrMxGroups-1:0], in_prod_any_zero_d             , in_prod_any_zero_q             , in_valid_mant_q)
+  `AUTEUR_PIPE(in_is_infinity_pipe               , get_input_flags_delay(PipeCfg), logic [NrBlocks-1:0], in_is_infinity_d               , in_is_infinity_q               , in_valid_mant_q)
+  `AUTEUR_PIPE(in_is_nan_pipe                    , get_input_flags_delay(PipeCfg), logic [NrBlocks-1:0], in_is_nan_d                    , in_is_nan_q                    , in_valid_mant_q)
+  `AUTEUR_PIPE(in_prod_any_positive_infinity_pipe, get_input_flags_delay(PipeCfg), logic [NrBlocks-1:0], in_prod_any_positive_infinity_d, in_prod_any_positive_infinity_q, in_valid_mant_q)
+  `AUTEUR_PIPE(in_prod_any_negative_infinity_pipe, get_input_flags_delay(PipeCfg), logic [NrBlocks-1:0], in_prod_any_negative_infinity_d, in_prod_any_negative_infinity_q, in_valid_mant_q)
+  `AUTEUR_PIPE(in_prod_any_zero_pipe             , get_input_flags_delay(PipeCfg), logic [NrBlocks-1:0], in_prod_any_zero_d             , in_prod_any_zero_q             , in_valid_mant_q)
 
 
   logic [NrMaxJoins:0][NrIn-1:0][2*InSuperFmtManBits-1:0] prod_mant_no_carry;
@@ -344,22 +340,22 @@ module auteur_dotp
     `AUTEUR_PIPE(prod_exp_carry_fifo   , get_exp_mant_input_margin(PipeCfg), logic [NrIn-1:0]                       , prod_exp_carry_fifo_d   , prod_exp_carry_fifo_q   , prod_exp_valid_fifo_d)
   end
 
-  logic [NrMxGroups-1:0]                             x_scale_sign_fifo_d, w_scale_sign_fifo_d, x_scale_sign_fifo_q, w_scale_sign_fifo_q;
-  logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0] x_scale_exp_fifo_d, w_scale_exp_fifo_d, x_scale_exp_fifo_q, w_scale_exp_fifo_q;
-  logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0] x_scale_mant_fifo_d, w_scale_mant_fifo_d, x_scale_mant_fifo_q, w_scale_mant_fifo_q;
+  logic [NrBlocks-1:0]                           x_scale_sign_fifo_d, w_scale_sign_fifo_d, x_scale_sign_fifo_q, w_scale_sign_fifo_q;
+  logic [NrBlocks-1:0][ScaleSuperFmtExpBits-1:0] x_scale_exp_fifo_d, w_scale_exp_fifo_d, x_scale_exp_fifo_q, w_scale_exp_fifo_q;
+  logic [NrBlocks-1:0][ScaleSuperFmtManBits-1:0] x_scale_mant_fifo_d, w_scale_mant_fifo_d, x_scale_mant_fifo_q, w_scale_mant_fifo_q;
 
-  fp_flags_t [NrMxGroups-1:0] x_scale_flags_fifo_d, w_scale_flags_fifo_d, x_scale_flags_fifo_q, w_scale_flags_fifo_q;
+  fp_flags_t [NrBlocks-1:0] x_scale_flags_fifo_d, w_scale_flags_fifo_d, x_scale_flags_fifo_q, w_scale_flags_fifo_q;
 
   logic in_valid_mant_scales_fifo;
   logic in_valid_exp_scales_fifo;
 
-  for (genvar g = 0; g < NrMxGroups; g++) begin : assign_scales_fifo_inputs
-    assign x_scale_sign_fifo_d[g] = x_scale_i[g].sign;
-    assign x_scale_exp_fifo_d[g]  = x_scale_i[g].exponent;
-    assign x_scale_mant_fifo_d[g] = x_scale_i[g].mantissa;
-    assign w_scale_sign_fifo_d[g] = w_scale_i[g].sign;
-    assign w_scale_exp_fifo_d[g]  = w_scale_i[g].exponent;
-    assign w_scale_mant_fifo_d[g] = w_scale_i[g].mantissa;
+  for (genvar b = 0; b < NrBlocks; b++) begin : assign_scales_fifo_inputs
+    assign x_scale_sign_fifo_d[b] = x_scale_i[b].sign;
+    assign x_scale_exp_fifo_d[b]  = x_scale_i[b].exponent;
+    assign x_scale_mant_fifo_d[b] = x_scale_i[b].mantissa;
+    assign w_scale_sign_fifo_d[b] = w_scale_i[b].sign;
+    assign w_scale_exp_fifo_d[b]  = w_scale_i[b].exponent;
+    assign w_scale_mant_fifo_d[b] = w_scale_i[b].mantissa;
   end
 
   assign x_scale_flags_fifo_d = x_scale_flags_i;
@@ -370,35 +366,35 @@ module auteur_dotp
   `AUTEUR_PIPE_VALID(in_valid_exp_scales_fifo_pipe , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, in_valid_i, in_valid_exp_scales_fifo )
 
   if (SyncWithFifos) begin
-    `AUTEUR_FIFO(x_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0]                            , x_scale_sign_fifo_d , x_scale_sign_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
-    `AUTEUR_FIFO(x_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_d  , x_scale_exp_fifo_q  , scale_valid_i, in_valid_exp_scales_fifo )
-    `AUTEUR_FIFO(x_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0], x_scale_mant_fifo_d , x_scale_mant_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
-    `AUTEUR_FIFO(x_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrMxGroups-1:0]                       , x_scale_flags_fifo_d, x_scale_flags_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
+    `AUTEUR_FIFO(x_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0]                          , x_scale_sign_fifo_d , x_scale_sign_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
+    `AUTEUR_FIFO(x_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_d  , x_scale_exp_fifo_q  , scale_valid_i, in_valid_exp_scales_fifo )
+    `AUTEUR_FIFO(x_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtManBits-1:0], x_scale_mant_fifo_d , x_scale_mant_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
+    `AUTEUR_FIFO(x_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrBlocks-1:0]                     , x_scale_flags_fifo_d, x_scale_flags_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
   end else begin
-    `AUTEUR_PIPE(x_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0]                            , x_scale_sign_fifo_d , x_scale_sign_fifo_q , scale_valid_i)
-    `AUTEUR_PIPE(x_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_d  , x_scale_exp_fifo_q  , scale_valid_i)
-    `AUTEUR_PIPE(x_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0], x_scale_mant_fifo_d , x_scale_mant_fifo_q , scale_valid_i)
-    `AUTEUR_PIPE(x_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrMxGroups-1:0]                       , x_scale_flags_fifo_d, x_scale_flags_fifo_q, scale_valid_i)
+    `AUTEUR_PIPE(x_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0]                            , x_scale_sign_fifo_d , x_scale_sign_fifo_q , scale_valid_i)
+    `AUTEUR_PIPE(x_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_d    , x_scale_exp_fifo_q  , scale_valid_i)
+    `AUTEUR_PIPE(x_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtManBits-1:0], x_scale_mant_fifo_d   , x_scale_mant_fifo_q , scale_valid_i)
+    `AUTEUR_PIPE(x_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrBlocks-1:0]                       , x_scale_flags_fifo_d, x_scale_flags_fifo_q, scale_valid_i)
   end
 
   if (SyncWithFifos) begin
-    `AUTEUR_FIFO(w_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0]                            , w_scale_sign_fifo_d , w_scale_sign_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
-    `AUTEUR_FIFO(w_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], w_scale_exp_fifo_d  , w_scale_exp_fifo_q  , scale_valid_i, in_valid_exp_scales_fifo )
-    `AUTEUR_FIFO(w_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0], w_scale_mant_fifo_d , w_scale_mant_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
-    `AUTEUR_FIFO(w_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrMxGroups-1:0]                       , w_scale_flags_fifo_d, w_scale_flags_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
+    `AUTEUR_FIFO(w_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0]                          , w_scale_sign_fifo_d , w_scale_sign_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
+    `AUTEUR_FIFO(w_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtExpBits-1:0], w_scale_exp_fifo_d  , w_scale_exp_fifo_q  , scale_valid_i, in_valid_exp_scales_fifo )
+    `AUTEUR_FIFO(w_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtManBits-1:0], w_scale_mant_fifo_d , w_scale_mant_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
+    `AUTEUR_FIFO(w_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrBlocks-1:0]                     , w_scale_flags_fifo_d, w_scale_flags_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
   end else begin
-    `AUTEUR_PIPE(w_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0]                            , w_scale_sign_fifo_d , w_scale_sign_fifo_q , scale_valid_i)
-    `AUTEUR_PIPE(w_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtExpBits-1:0], w_scale_exp_fifo_d  , w_scale_exp_fifo_q  , scale_valid_i)
-    `AUTEUR_PIPE(w_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrMxGroups-1:0][MxScaleSuperFmtManBits-1:0], w_scale_mant_fifo_d , w_scale_mant_fifo_q , scale_valid_i)
-    `AUTEUR_PIPE(w_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrMxGroups-1:0]                       , w_scale_flags_fifo_d, w_scale_flags_fifo_q, scale_valid_i)
+    `AUTEUR_PIPE(w_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0]                          , w_scale_sign_fifo_d , w_scale_sign_fifo_q , scale_valid_i)
+    `AUTEUR_PIPE(w_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtExpBits-1:0], w_scale_exp_fifo_d  , w_scale_exp_fifo_q  , scale_valid_i)
+    `AUTEUR_PIPE(w_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtManBits-1:0], w_scale_mant_fifo_d , w_scale_mant_fifo_q , scale_valid_i)
+    `AUTEUR_PIPE(w_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrBlocks-1:0]                     , w_scale_flags_fifo_d, w_scale_flags_fifo_q, scale_valid_i)
   end
 
   //Movable registers for the scales
-  logic [NrMxScales-1:0]                             x_scale_sign_q, w_scale_sign_q;
-  logic [NrMxScales-1:0][MxScaleSuperFmtExpBits-1:0] x_scale_exp_q, w_scale_exp_q;
-  logic [NrMxScales-1:0][MxScaleSuperFmtManBits-1:0] x_scale_mant_q, w_scale_mant_q;
+  logic [NrBlocks-1:0]                           x_scale_sign_q, w_scale_sign_q;
+  logic [NrBlocks-1:0][ScaleSuperFmtExpBits-1:0] x_scale_exp_q, w_scale_exp_q;
+  logic [NrBlocks-1:0][ScaleSuperFmtManBits-1:0] x_scale_mant_q, w_scale_mant_q;
 
-  fp_flags_t [NrMxGroups-1:0] x_scale_flags_q, w_scale_flags_q;
+  fp_flags_t [NrBlocks-1:0] x_scale_flags_q, w_scale_flags_q;
 
   logic in_valid_mant_scales;
   logic in_valid_exp_scales;
@@ -406,22 +402,22 @@ module auteur_dotp
   `AUTEUR_PIPE_VALID(in_valid_mant_scales_pipe, PipeCfg.scale_path.mantissa_path.inputs, in_valid_mant_scales_fifo, in_valid_mant_scales)
   `AUTEUR_PIPE_VALID(in_valid_exp_scales_pipe , PipeCfg.scale_path.exponent_path.inputs, in_valid_exp_scales_fifo , in_valid_exp_scales )
 
-  `AUTEUR_PIPE(x_scale_sign_pipe , PipeCfg.scale_path.mantissa_path.inputs, logic [NrMxScales-1:0]                            , x_scale_sign_fifo_q , x_scale_sign_q , in_valid_mant_scales_fifo)
-  `AUTEUR_PIPE(x_scale_exp_pipe  , PipeCfg.scale_path.exponent_path.inputs, logic [NrMxScales-1:0][MxScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_q  , x_scale_exp_q  , in_valid_exp_scales_fifo )
-  `AUTEUR_PIPE(x_scale_mant_pipe , PipeCfg.scale_path.mantissa_path.inputs, logic [NrMxScales-1:0][MxScaleSuperFmtManBits-1:0], x_scale_mant_fifo_q , x_scale_mant_q , in_valid_mant_scales_fifo)
-  `AUTEUR_PIPE(x_scale_flags_pipe, PipeCfg.scale_path.mantissa_path.inputs, fp_flags_t [NrMxGroups-1:0]                       , x_scale_flags_fifo_q, x_scale_flags_q, in_valid_mant_scales_fifo)
+  `AUTEUR_PIPE(x_scale_sign_pipe , PipeCfg.scale_path.mantissa_path.inputs, logic [NrBlocks-1:0]                          , x_scale_sign_fifo_q , x_scale_sign_q , in_valid_mant_scales_fifo)
+  `AUTEUR_PIPE(x_scale_exp_pipe  , PipeCfg.scale_path.exponent_path.inputs, logic [NrBlocks-1:0][ScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_q  , x_scale_exp_q  , in_valid_exp_scales_fifo )
+  `AUTEUR_PIPE(x_scale_mant_pipe , PipeCfg.scale_path.mantissa_path.inputs, logic [NrBlocks-1:0][ScaleSuperFmtManBits-1:0], x_scale_mant_fifo_q , x_scale_mant_q , in_valid_mant_scales_fifo)
+  `AUTEUR_PIPE(x_scale_flags_pipe, PipeCfg.scale_path.mantissa_path.inputs, fp_flags_t [NrBlocks-1:0]                     , x_scale_flags_fifo_q, x_scale_flags_q, in_valid_mant_scales_fifo)
 
-  `AUTEUR_PIPE(w_scale_sign_pipe , PipeCfg.scale_path.mantissa_path.inputs, logic [NrMxScales-1:0]                            , w_scale_sign_fifo_q , w_scale_sign_q , in_valid_mant_scales_fifo)
-  `AUTEUR_PIPE(w_scale_exp_pipe  , PipeCfg.scale_path.exponent_path.inputs, logic [NrMxScales-1:0][MxScaleSuperFmtExpBits-1:0], w_scale_exp_fifo_q  , w_scale_exp_q  , in_valid_exp_scales_fifo )
-  `AUTEUR_PIPE(w_scale_mant_pipe , PipeCfg.scale_path.mantissa_path.inputs, logic [NrMxScales-1:0][MxScaleSuperFmtManBits-1:0], w_scale_mant_fifo_q , w_scale_mant_q , in_valid_mant_scales_fifo)
-  `AUTEUR_PIPE(w_scale_flags_pipe, PipeCfg.scale_path.mantissa_path.inputs, fp_flags_t [NrMxGroups-1:0]                       , w_scale_flags_fifo_q, w_scale_flags_q, in_valid_mant_scales_fifo)
+  `AUTEUR_PIPE(w_scale_sign_pipe , PipeCfg.scale_path.mantissa_path.inputs, logic [NrBlocks-1:0]                          , w_scale_sign_fifo_q , w_scale_sign_q , in_valid_mant_scales_fifo)
+  `AUTEUR_PIPE(w_scale_exp_pipe  , PipeCfg.scale_path.exponent_path.inputs, logic [NrBlocks-1:0][ScaleSuperFmtExpBits-1:0], w_scale_exp_fifo_q  , w_scale_exp_q  , in_valid_exp_scales_fifo )
+  `AUTEUR_PIPE(w_scale_mant_pipe , PipeCfg.scale_path.mantissa_path.inputs, logic [NrBlocks-1:0][ScaleSuperFmtManBits-1:0], w_scale_mant_fifo_q , w_scale_mant_q , in_valid_mant_scales_fifo)
+  `AUTEUR_PIPE(w_scale_flags_pipe, PipeCfg.scale_path.mantissa_path.inputs, fp_flags_t [NrBlocks-1:0]                     , w_scale_flags_fifo_q, w_scale_flags_q, in_valid_mant_scales_fifo)
 
 
-  logic [NrMxGroups-1:0] scale_is_infinity_d, scale_is_infinity_q,
-                         scale_is_nan_d, scale_is_nan_q;
+  logic [NrBlocks-1:0]  scale_is_infinity_d, scale_is_infinity_q,
+                        scale_is_nan_d, scale_is_nan_q;
 
-  logic [NrMxGroups-1:0] scale_prod_any_positive_infinity_d, scale_prod_any_negative_infinity_d, scale_prod_any_positive_infinity_q, scale_prod_any_negative_infinity_q,
-                         scale_prod_any_zero_d, scale_prod_any_zero_q;
+  logic [NrBlocks-1:0]  scale_prod_any_positive_infinity_d, scale_prod_any_negative_infinity_d, scale_prod_any_positive_infinity_q, scale_prod_any_negative_infinity_q,
+                        scale_prod_any_zero_d, scale_prod_any_zero_q;
 
   always_comb begin : detect_scale_exceptions
     scale_is_infinity_d                = '0;
@@ -430,21 +426,21 @@ module auteur_dotp
     scale_prod_any_negative_infinity_d = '0;
     scale_prod_any_zero_d              = '0;
 
-    for (int unsigned g = 0; g < NrMxGroups; g++) begin
-      scale_is_infinity_d[g] = x_scale_flags_q[g].is_infinity | w_scale_flags_q[g].is_infinity;
-      scale_is_nan_d[g]      = x_scale_flags_q[g].is_nan | w_scale_flags_q[g].is_nan | (x_scale_flags_q[g].is_infinity & w_scale_flags_q[g].is_zero) | (w_scale_flags_q[g].is_infinity & x_scale_flags_q[g].is_zero);
+    for (int unsigned b = 0; b < NrBlocks; b++) begin
+      scale_is_infinity_d[b] = x_scale_flags_q[b].is_infinity | w_scale_flags_q[b].is_infinity;
+      scale_is_nan_d[b]      = x_scale_flags_q[b].is_nan | w_scale_flags_q[b].is_nan | (x_scale_flags_q[b].is_infinity & w_scale_flags_q[b].is_zero) | (w_scale_flags_q[b].is_infinity & x_scale_flags_q[b].is_zero);
 
-      scale_prod_any_positive_infinity_d[g] = (x_scale_flags_q[g].is_infinity | w_scale_flags_q[g].is_infinity) & (x_scale_sign_q[g] == w_scale_sign_q[g]);
-      scale_prod_any_negative_infinity_d[g] = (x_scale_flags_q[g].is_infinity | w_scale_flags_q[g].is_infinity) & (x_scale_sign_q[g] ^ w_scale_sign_q[g]);
-      scale_prod_any_zero_d[g]              = (x_scale_flags_q[g].is_zero | w_scale_flags_q[g].is_zero);
+      scale_prod_any_positive_infinity_d[b] = (x_scale_flags_q[b].is_infinity | w_scale_flags_q[b].is_infinity) & (x_scale_sign_q[b] == w_scale_sign_q[b]);
+      scale_prod_any_negative_infinity_d[b] = (x_scale_flags_q[b].is_infinity | w_scale_flags_q[b].is_infinity) & (x_scale_sign_q[b] ^ w_scale_sign_q[b]);
+      scale_prod_any_zero_d[b]              = (x_scale_flags_q[b].is_zero | w_scale_flags_q[b].is_zero);
     end
   end
 
-  `AUTEUR_PIPE(scale_is_infinity_pipe               , get_scale_flags_delay(PipeCfg), logic [NrMxGroups-1:0], scale_is_infinity_d               , scale_is_infinity_q               , in_valid_mant_scales)
-  `AUTEUR_PIPE(scale_is_nan_pipe                    , get_scale_flags_delay(PipeCfg), logic [NrMxGroups-1:0], scale_is_nan_d                    , scale_is_nan_q                    , in_valid_mant_scales)
-  `AUTEUR_PIPE(scale_prod_any_positive_infinity_pipe, get_scale_flags_delay(PipeCfg), logic [NrMxGroups-1:0], scale_prod_any_positive_infinity_d, scale_prod_any_positive_infinity_q, in_valid_mant_scales)
-  `AUTEUR_PIPE(scale_prod_any_negative_infinity_pipe, get_scale_flags_delay(PipeCfg), logic [NrMxGroups-1:0], scale_prod_any_negative_infinity_d, scale_prod_any_negative_infinity_q, in_valid_mant_scales)
-  `AUTEUR_PIPE(scale_prod_any_zero_pipe             , get_scale_flags_delay(PipeCfg), logic [NrMxGroups-1:0], scale_prod_any_zero_d             , scale_prod_any_zero_q             , in_valid_mant_scales)
+  `AUTEUR_PIPE(scale_is_infinity_pipe               , get_scale_flags_delay(PipeCfg), logic [NrBlocks-1:0], scale_is_infinity_d               , scale_is_infinity_q               , in_valid_mant_scales)
+  `AUTEUR_PIPE(scale_is_nan_pipe                    , get_scale_flags_delay(PipeCfg), logic [NrBlocks-1:0], scale_is_nan_d                    , scale_is_nan_q                    , in_valid_mant_scales)
+  `AUTEUR_PIPE(scale_prod_any_positive_infinity_pipe, get_scale_flags_delay(PipeCfg), logic [NrBlocks-1:0], scale_prod_any_positive_infinity_d, scale_prod_any_positive_infinity_q, in_valid_mant_scales)
+  `AUTEUR_PIPE(scale_prod_any_negative_infinity_pipe, get_scale_flags_delay(PipeCfg), logic [NrBlocks-1:0], scale_prod_any_negative_infinity_d, scale_prod_any_negative_infinity_q, in_valid_mant_scales)
+  `AUTEUR_PIPE(scale_prod_any_zero_pipe             , get_scale_flags_delay(PipeCfg), logic [NrBlocks-1:0], scale_prod_any_zero_d             , scale_prod_any_zero_q             , in_valid_mant_scales)
 
 
   logic [NrIn-1:0][2*InSuperFmtManBits-1:0] in_prod_mant_no_carry;
@@ -461,40 +457,40 @@ module auteur_dotp
   assign in_prod_sign          = prod_sign_q;
 
 
-  logic [NrMxScales-1:0][2*MxScaleSuperFmtManBits+1:0] scale_prod_mant_d, scale_prod_mant_q;
-  logic [NrMxScales-1:0][MxScaleSuperFmtExpBits:0]     scale_prod_exp_d, scale_prod_exp_q;
-  logic [NrMxScales-1:0]                               scale_prod_sign_d, scale_prod_sign_q;
+  logic [NrBlocks-1:0][2*ScaleSuperFmtManBits+1:0] scale_prod_mant_d, scale_prod_mant_q;
+  logic [NrBlocks-1:0][ScaleSuperFmtExpBits:0]     scale_prod_exp_d, scale_prod_exp_q;
+  logic [NrBlocks-1:0]                             scale_prod_sign_d, scale_prod_sign_q;
 
-  logic                                                scale_prod_mant_valid_d, scale_prod_mant_valid_q;
-  logic                                                scale_prod_exp_valid_d, scale_prod_exp_valid_q;
+  logic                                            scale_prod_mant_valid_d, scale_prod_mant_valid_q;
+  logic                                            scale_prod_exp_valid_d, scale_prod_exp_valid_q;
 
-  for (genvar g = 0; g < NrMxGroups; g++) begin : assign_scale_products
+  for (genvar b = 0; b < NrBlocks; b++) begin : assign_scale_products
     logic x_scales_lead;
     logic w_scales_lead;
 
-    assign x_scales_lead   = ~x_scale_flags_q[g].is_denormal;
-    assign w_scales_lead   = ~w_scale_flags_q[g].is_denormal;
+    assign x_scales_lead   = ~x_scale_flags_q[b].is_denormal;
+    assign w_scales_lead   = ~w_scale_flags_q[b].is_denormal;
 
-    assign scale_prod_mant_d[g] = {x_scales_lead,x_scale_mant_q[g]}*{w_scales_lead,w_scale_mant_q[g]};
-    assign scale_prod_exp_d[g]  = x_scale_exp_q[g] + w_scale_exp_q[g];
-    assign scale_prod_sign_d[g] = x_scale_sign_q[g] ^ w_scale_sign_q[g];
+    assign scale_prod_mant_d[b] = {x_scales_lead,x_scale_mant_q[b]}*{w_scales_lead,w_scale_mant_q[b]};
+    assign scale_prod_exp_d[b]  = x_scale_exp_q[b] + w_scale_exp_q[b];
+    assign scale_prod_sign_d[b] = x_scale_sign_q[b] ^ w_scale_sign_q[b];
   end
 
   assign scale_prod_mant_valid_d = in_valid_mant_scales;
   assign scale_prod_exp_valid_d  = in_valid_exp_scales;
 
-  `AUTEUR_PIPE(scale_prod_mant_pipe, PipeCfg.scale_path.mantissa_path.scale_product, logic [NrMxScales-1:0][2*MxScaleSuperFmtManBits+1:0], scale_prod_mant_d, scale_prod_mant_q, scale_prod_mant_valid_d)
-  `AUTEUR_PIPE(scale_prod_exp_pipe , PipeCfg.scale_path.exponent_path.scale_product, logic [NrMxScales-1:0][MxScaleSuperFmtExpBits:0]    , scale_prod_exp_d , scale_prod_exp_q , scale_prod_exp_valid_d )
-  `AUTEUR_PIPE(scale_prod_sign_pipe, PipeCfg.scale_path.mantissa_path.scale_product, logic [NrMxScales-1:0]                              , scale_prod_sign_d, scale_prod_sign_q, scale_prod_mant_valid_d)
+  `AUTEUR_PIPE(scale_prod_mant_pipe, PipeCfg.scale_path.mantissa_path.scale_product, logic [NrBlocks-1:0][2*ScaleSuperFmtManBits+1:0], scale_prod_mant_d, scale_prod_mant_q, scale_prod_mant_valid_d)
+  `AUTEUR_PIPE(scale_prod_exp_pipe , PipeCfg.scale_path.exponent_path.scale_product, logic [NrBlocks-1:0][ScaleSuperFmtExpBits:0]    , scale_prod_exp_d , scale_prod_exp_q , scale_prod_exp_valid_d )
+  `AUTEUR_PIPE(scale_prod_sign_pipe, PipeCfg.scale_path.mantissa_path.scale_product, logic [NrBlocks-1:0]                            , scale_prod_sign_d, scale_prod_sign_q, scale_prod_mant_valid_d)
 
   `AUTEUR_PIPE_VALID(scale_prod_mant_valid_pipe, PipeCfg.scale_path.mantissa_path.scale_product, scale_prod_mant_valid_d, scale_prod_mant_valid_q)
   `AUTEUR_PIPE_VALID(scale_prod_exp_valid_pipe , PipeCfg.scale_path.exponent_path.scale_product, scale_prod_exp_valid_d , scale_prod_exp_valid_q )
 
 
-  logic [NrMxGroups-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0]   max_in_prod_exps;
+  logic [NrBlocks-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0]     max_in_prod_exps;
   logic [NrInMaxWidth-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] in_shifts_wrt_in_d, in_shifts_wrt_in_q;
 
-  // This function generates the table that contains the indexes of the last comparators for each formats.
+  // This function generates the table that contains the indexes of the last comparators for each format.
   // For example, in a format with no joins every single comparator is the last one, while in a format that requires one join only odd comparators are marked as final
   typedef int unsigned node_table_t [NrMaxJoins:0][MaxInWidth-1:0];
 
@@ -514,31 +510,32 @@ module auteur_dotp
 
   localparam int unsigned MaxTreeLastComp [NrMaxJoins:0][MaxInWidth-1:0] = gen_max_tree_last_comp();
 
-  // Find the maximum exponent for each MX group
-  for (genvar g = 0; g < NrMxGroups; g++) begin : gen_groups_max_trees
-    localparam MxGroupOffset = g*MxGroupSize;
+  // Find the maximum exponent for each MX block
+  for (genvar b = 0; b < NrBlocks; b++) begin : gen_blocks_max_trees
+    localparam BlockOffset = b*BlockSize;
 
-    // ASSUMPTION: no supported input format can have more exponent bits than the output super format
-    // NOTE: there is one more bit since the surplus bias has not been subtracted yet
-    logic [$clog2(MxGroupSizeMax):0][MxGroupSizeMax-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_tree_stages;
+    // We assume no supported input format can have more exponent bits than the output super format
+    // max_in_prod_exps_tree_stages uses InSuperFmtExpBits+1 bits rather than InSuperFmtExpBits since the surplus bias has not been subtracted yet
+    logic [$clog2(BlockSizeMax):0][BlockSizeMax-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_tree_stages;
     logic [NrMaxJoins:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_narrow_tree_stages;
 
-    for (genvar n = 0; n < MxGroupSize; n += MaxInWidth) begin : gen_max_tree_initial_nodes
+    for (genvar n = 0; n < BlockSize; n += MaxInWidth) begin : gen_max_tree_initial_nodes
       for (genvar e = 0; e < MaxInWidth; e++) begin : assign_elements
-        assign max_in_prod_exps_tree_stages[0][n>>NrMaxJoins][e] = {in_prod_exp_carry[n+e+MxGroupOffset],in_prod_exp_no_carry[n+e+MxGroupOffset]};
+        assign max_in_prod_exps_tree_stages[0][n>>NrMaxJoins][e] = {in_prod_exp_carry[n+e+BlockOffset],in_prod_exp_no_carry[n+e+BlockOffset]};
       end
     end
 
-    // The max tree is generated wrt the largest supported input format
-    for (genvar s = 0; s < $clog2(MxGroupSizeMax); s++) begin : gen_max_tree
-      for (genvar n = 0; n < MxGroupSize>>(NrMaxJoins+s); n+=2) begin : gen_nodes
+    // The max tree is generated with respect to the largest supported input format (i.e., each node compares 2^NrMaxJoins elements regardless of the format)
+    // If the input format is not the largest one, we manipulate the comparators' carry in to adjust the format width
+    for (genvar s = 0; s < $clog2(BlockSizeMax); s++) begin : gen_max_tree
+      for (genvar n = 0; n < BlockSize>>(NrMaxJoins+s); n+=2) begin : gen_nodes
         logic [MaxInWidth-1:0][1:0] comp_carry_out;
 
         for (genvar c = 0; c < MaxInWidth; c++) begin : gen_comparators
           logic [1:0] comp_carry_in;
 
-          // Do not even consider the carry in if this is the last comparator.
-          // Without this, the synthesis tool reports a out of bounds index (even though this can't actually happen!).
+          // Do not consider the carry in if this is the last comparator
+          // Without this, synthesizing this line results in an out-of-bounds index error (even though this can't actually happen!)
           if (c != MaxInWidth-1) begin
             always_comb begin : assign_comp_carry_in
               comp_carry_in[0] = comp_carry_out[c+1][0];
@@ -564,9 +561,9 @@ module auteur_dotp
       end
     end
 
-    assign max_in_prod_exps_narrow_tree_stages[0] = max_in_prod_exps_tree_stages[$clog2(MxGroupSizeMax)][0];
+    assign max_in_prod_exps_narrow_tree_stages[0] = max_in_prod_exps_tree_stages[$clog2(BlockSizeMax)][0];
 
-    // For the narrower formats, a smaller tree is generated
+    // If we are not using the widest available format, we need additional (narrower) stages to compute the actual maximum
     for (genvar s = 0; s < NrMaxJoins; s++) begin : gen_narrow_max_tree
       localparam int unsigned NodeWidth = 1<<(NrMaxJoins-s-1);
 
@@ -602,48 +599,49 @@ module auteur_dotp
       end
     end
 
-    assign max_in_prod_exps[g] = max_in_prod_exps_narrow_tree_stages[NrMaxJoins];
+    assign max_in_prod_exps[b] = max_in_prod_exps_narrow_tree_stages[NrMaxJoins];
 
     // Now that we have the maximum exponent:
     //  - we use it to calculate the shifts for each of the elements
-    //  - we calculate the actual exponent value (using OutSuperFmtExpBits) and use it to compute the shift wrt y_i
-    for (genvar i = 0; i < MxGroupSizeMax; i++) begin : assign_shifts
+    //  - we calculate the actual exponent value (using OutSuperFmtExpBits) and use it to compute the shift with respect to y_i
+    for (genvar i = 0; i < BlockSizeMax; i++) begin : assign_shifts
       logic [MaxInWidth-1:0][InSuperFmtExpBits:0] exp_packed;
 
       for (genvar e = 0; e < MaxInWidth; e++) begin
-        assign exp_packed[e] = {in_prod_exp_carry[i*MaxInWidth+e+MxGroupOffset],in_prod_exp_no_carry[i*MaxInWidth+e+MxGroupOffset]};
+        assign exp_packed[e] = {in_prod_exp_carry[i*MaxInWidth+e+BlockOffset],in_prod_exp_no_carry[i*MaxInWidth+e+BlockOffset]};
       end
 
-      assign in_shifts_wrt_in_d[i+MxGroupOffset/MaxInWidth] = max_in_prod_exps[g] - exp_packed;
+      assign in_shifts_wrt_in_d[i+BlockOffset/MaxInWidth] = max_in_prod_exps[b] - exp_packed;
     end
   end
 
 
-  logic [NrMxGroups-1:0][MaxInWidth*InSuperFmtExpBits:0] max_in_prod_exps_norm_wide;
+  logic [NrBlocks-1:0][MaxInWidth*InSuperFmtExpBits:0] max_in_prod_exps_norm_wide;
 
-  logic [NrMxGroups-1:0][OutSuperFmtExpBits:0]           max_in_prod_exps_norm_wide_pad,
-                                                         scale_prod_exp_pad;
+  logic [NrBlocks-1:0][OutSuperFmtExpBits:0]           max_in_prod_exps_norm_wide_pad,
+                                                       scale_prod_exp_pad;
 
-  logic [NrMxGroups-1:0][OutSuperFmtExpBits-1:0]         inputs_max_exp_norm;
-  logic [NrMxGroups-1:0]                                 inputs_max_exp_overflow;
-  logic [NrMxGroups-1:0][OutSuperFmtExpBits:0]           scale_exp_norm;
+  logic [NrBlocks-1:0][OutSuperFmtExpBits-1:0]         inputs_max_exp_norm;
+  logic [NrBlocks-1:0]                                 inputs_max_exp_overflow;
+  logic [NrBlocks-1:0][OutSuperFmtExpBits:0]           scale_exp_norm;
 
-  logic [NrMxGroups-1:0][OutSuperFmtExpBits-1:0]         in_scale_prod_exp_norm_d;
-  logic [NrMxGroups-1:0]                                 in_scale_prod_exp_norm_overflow;
+  logic [NrBlocks-1:0][OutSuperFmtExpBits-1:0]         in_scale_prod_exp_norm_d;
+  logic [NrBlocks-1:0]                                 in_scale_prod_exp_norm_overflow;
 
-  logic [OutSuperFmtExpBits-1:0]                         absolute_max_exp_d, absolute_max_exp_q;
+  logic [OutSuperFmtExpBits-1:0]                       absolute_max_exp_d, absolute_max_exp_q;
 
-  logic [NrMxGroups-1:0][OutSuperFmtExpBits-1:0]         scale_shift_adj_d, scale_shift_adj_q;
+  logic [NrBlocks-1:0][OutSuperFmtExpBits-1:0]         scale_shift_adj_d, scale_shift_adj_q;
 
-  logic                                                  maximum_exponent_overflow_d, maximum_exponent_overflow_q;
+  logic                                                maximum_exponent_overflow_d, maximum_exponent_overflow_q;
 
-  logic                                                  maximum_exponent_valid_d, maximum_exponent_valid_q;
+  logic                                                maximum_exponent_valid_d, maximum_exponent_valid_q;
 
-  dotp_cfg_t                                             cfg_exp_max_exp_d, cfg_exp_max_exp_q;
+  dotp_cfg_t                                           cfg_exp_max_exp_d, cfg_exp_max_exp_q;
 
-  for (genvar g = 0; g < NrMxGroups; g++) begin : assign_max_in_prod_exps_norm_wide
-    always_comb begin : assign_group_max_in_prod_exps_norm_wide
-      max_in_prod_exps_norm_wide[g] = '0;
+  // Since the maximum exponent of each block is split into 2^NrMaxJoins segments, here we pack it into a single variable
+  for (genvar b = 0; b < NrBlocks; b++) begin : assign_max_in_prod_exps_norm_wide
+    always_comb begin : assign_block_max_in_prod_exps_norm_wide
+      max_in_prod_exps_norm_wide[b] = '0;
 
       for (int unsigned e = 0; e < MaxInWidth; e++) begin
         // Actual (nonconstant) loop bound, put inside the body of the loop to avoid synthesis problems
@@ -651,53 +649,53 @@ module auteur_dotp
           break;
         end
 
-        max_in_prod_exps_norm_wide[g][e*InSuperFmtExpBits+:InSuperFmtExpBits] = max_in_prod_exps[g][e][InSuperFmtExpBits-1:0];
-        max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits-:1]        = max_in_prod_exps[g][e][InSuperFmtExpBits-:1];
+        max_in_prod_exps_norm_wide[b][e*InSuperFmtExpBits+:InSuperFmtExpBits] = max_in_prod_exps[b][e][InSuperFmtExpBits-1:0];
+        max_in_prod_exps_norm_wide[b][MaxInWidth*InSuperFmtExpBits-:1]        = max_in_prod_exps[b][e][InSuperFmtExpBits-:1];
       end
 
       for (int unsigned i = MaxInWidth*InSuperFmtExpBits-1; i >= InSuperFmtExpBits; i--) begin
-        // Actual (nonconstant) loop bound, just like the other one
+        // Actual (nonconstant) loop bound, just like the previous one
         if (i < (1<<cfg_exp_fifo_q.num_joins)*InSuperFmtExpBits) begin
           break;
         end
 
-        max_in_prod_exps_norm_wide[g][i] = ~max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits];
+        max_in_prod_exps_norm_wide[b][i] = ~max_in_prod_exps_norm_wide[b][MaxInWidth*InSuperFmtExpBits];
       end
     end
 
     // Pad max_in_prod_exps_norm_wide and scale_prod_exp if they are shorter than OutSuperFmtExpBits
     if (MaxInWidth*InSuperFmtExpBits < OutSuperFmtExpBits) begin
-      assign max_in_prod_exps_norm_wide_pad[g] = {max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits-:2],{(OutSuperFmtExpBits-MaxInWidth*InSuperFmtExpBits){1'b0}},max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits-2:0]};
+      assign max_in_prod_exps_norm_wide_pad[b] = {max_in_prod_exps_norm_wide[b][MaxInWidth*InSuperFmtExpBits-:2],{(OutSuperFmtExpBits-MaxInWidth*InSuperFmtExpBits){1'b0}},max_in_prod_exps_norm_wide[b][MaxInWidth*InSuperFmtExpBits-2:0]};
     end else begin
-      assign max_in_prod_exps_norm_wide_pad[g] = {max_in_prod_exps_norm_wide[g][MaxInWidth*InSuperFmtExpBits-:2],max_in_prod_exps_norm_wide[g][OutSuperFmtExpBits-2:0]};
+      assign max_in_prod_exps_norm_wide_pad[b] = {max_in_prod_exps_norm_wide[b][MaxInWidth*InSuperFmtExpBits-:2],max_in_prod_exps_norm_wide[b][OutSuperFmtExpBits-2:0]};
     end
 
-    if (MxScaleSuperFmtExpBits < OutSuperFmtExpBits) begin
-      assign scale_prod_exp_pad[g] = {scale_prod_exp_q[g][MxScaleSuperFmtExpBits-:2],{(OutSuperFmtExpBits-MxScaleSuperFmtExpBits){1'b0}},scale_prod_exp_q[g][MxScaleSuperFmtExpBits-2:0]};
+    if (ScaleSuperFmtExpBits < OutSuperFmtExpBits) begin
+      assign scale_prod_exp_pad[b] = {scale_prod_exp_q[b][ScaleSuperFmtExpBits-:2],{(OutSuperFmtExpBits-ScaleSuperFmtExpBits){1'b0}},scale_prod_exp_q[b][ScaleSuperFmtExpBits-2:0]};
     end else begin
-      assign scale_prod_exp_pad[g] = scale_prod_exp_q[g][MxScaleSuperFmtExpBits-:OutSuperFmtExpBits+1];
+      assign scale_prod_exp_pad[b] = scale_prod_exp_q[b][ScaleSuperFmtExpBits-:OutSuperFmtExpBits+1];
     end
 
     // Again, here we assume no valid input format can have more exponent bits than the output super format
-    assign {inputs_max_exp_overflow[g],inputs_max_exp_norm[g]} = max_in_prod_exps_norm_wide_pad[g] - OutSuperFmtBias;
+    assign {inputs_max_exp_overflow[b],inputs_max_exp_norm[b]} = max_in_prod_exps_norm_wide_pad[b] - OutSuperFmtBias;
 
-    assign scale_exp_norm[g]                                                = scale_prod_exp_pad[g] - OutSuperFmtBias;
-    assign {in_scale_prod_exp_norm_overflow[g],in_scale_prod_exp_norm_d[g]} = inputs_max_exp_norm[g] + scale_exp_norm[g] - OutSuperFmtBias;
+    assign scale_exp_norm[b]                                                = scale_prod_exp_pad[b] - OutSuperFmtBias;
+    assign {in_scale_prod_exp_norm_overflow[b],in_scale_prod_exp_norm_d[b]} = inputs_max_exp_norm[b] + scale_exp_norm[b] - OutSuperFmtBias;
   end
 
   // We now find the absolue maximum exponent and use it to calculate the shift adjustments
   always_comb begin : assign_absolute_max_exp
     absolute_max_exp_d = '0;
 
-    for (int unsigned g = 0; g < NrMxGroups; g++) begin
-      if (in_scale_prod_exp_norm_d[g] > absolute_max_exp_d) begin
-        absolute_max_exp_d = in_scale_prod_exp_norm_d[g];
+    for (int unsigned b = 0; b < NrBlocks; b++) begin
+      if (in_scale_prod_exp_norm_d[b] > absolute_max_exp_d) begin
+        absolute_max_exp_d = in_scale_prod_exp_norm_d[b];
       end
     end
   end
 
-  for (genvar g = 0; g < NrMxGroups; g++) begin : assign_scale_shift_adj
-    assign scale_shift_adj_d[g] = absolute_max_exp_d - in_scale_prod_exp_norm_d[g];
+  for (genvar b = 0; b < NrBlocks; b++) begin : assign_scale_shift_adj
+    assign scale_shift_adj_d[b] = absolute_max_exp_d - in_scale_prod_exp_norm_d[b];
   end
 
   assign maximum_exponent_overflow_d = |in_scale_prod_exp_norm_overflow || |inputs_max_exp_overflow;
@@ -706,11 +704,11 @@ module auteur_dotp
 
   assign cfg_exp_max_exp_d = cfg_exp_fifo_q;
 
-  `AUTEUR_PIPE(cfg_exp_max_exp_pipe       , PipeCfg.input_path.exponent_path.maximum_exponent, dotp_cfg_t                                                   , cfg_exp_max_exp_d       , cfg_exp_max_exp_q       , maximum_exponent_valid_d)
+  `AUTEUR_PIPE(cfg_exp_max_exp_pipe, PipeCfg.input_path.exponent_path.maximum_exponent, dotp_cfg_t, cfg_exp_max_exp_d, cfg_exp_max_exp_q, maximum_exponent_valid_d)
 
-  `AUTEUR_PIPE(in_shifts_wrt_in_pipe      , PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrInMaxWidth-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0], in_shifts_wrt_in_d      , in_shifts_wrt_in_q      , maximum_exponent_valid_d)
-  `AUTEUR_PIPE(absolute_max_exp_pipe      , PipeCfg.input_path.exponent_path.maximum_exponent, logic [OutSuperFmtExpBits-1:0]                               , absolute_max_exp_d      , absolute_max_exp_q      , maximum_exponent_valid_d)
-  `AUTEUR_PIPE(scale_shift_adj_pipe       , PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrMxScales-1:0][OutSuperFmtExpBits-1:0]               , scale_shift_adj_d       , scale_shift_adj_q       , maximum_exponent_valid_d)
+  `AUTEUR_PIPE(in_shifts_wrt_in_pipe, PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrInMaxWidth-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0], in_shifts_wrt_in_d, in_shifts_wrt_in_q, maximum_exponent_valid_d)
+  `AUTEUR_PIPE(absolute_max_exp_pipe, PipeCfg.input_path.exponent_path.maximum_exponent, logic [OutSuperFmtExpBits-1:0]                               , absolute_max_exp_d, absolute_max_exp_q, maximum_exponent_valid_d)
+  `AUTEUR_PIPE(scale_shift_adj_pipe , PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrBlocks-1:0][OutSuperFmtExpBits-1:0]                 , scale_shift_adj_d , scale_shift_adj_q , maximum_exponent_valid_d)
   `AUTEUR_PIPE_VALID(in_scale_prod_exp_norm_valid, PipeCfg.input_path.exponent_path.maximum_exponent, maximum_exponent_valid_d, maximum_exponent_valid_q)
 
   `AUTEUR_PIPE(maximum_exponent_overflow_pipe, get_exp_overflow_delay(PipeCfg), logic, maximum_exponent_overflow_d, maximum_exponent_overflow_q, maximum_exponent_valid_d)
@@ -800,7 +798,7 @@ module auteur_dotp
     logic [ShiftAmountWidth-1:0] local_shift;
     logic [ShiftAmountWidth-1:0] local_shift_adj;
 
-    assign {overflow,local_shift}          = in_shift + in_shifts_norm[i] + scale_shift_adj_q[i/MxGroupSize];
+    assign {overflow,local_shift}          = in_shift + in_shifts_norm[i] + scale_shift_adj_q[i/BlockSize];
     assign {overflow_adj, local_shift_adj} = local_shift + AdjTable[cfg_exp_max_exp_q.num_joins][i%MaxInWidth] * ((InSuperFmtManBits+InManUnnorm) * 2); // Adjust the local shift if it is part of a larger mantissa
     assign in_shifts_final_d[i]            = |overflow || overflow_adj ? '1 : local_shift_adj;
   end
@@ -813,20 +811,20 @@ module auteur_dotp
   `AUTEUR_PIPE_VALID(final_shift_pipe_valid, PipeCfg.input_path.exponent_path.final_shifts, in_shifts_final_valid_d, in_shifts_final_valid_q)  // Do we need this? We should be synchronized with the mantissa path at this point...
 
 
-  logic [NrIn-1:0][2*InSuperFmtManBits+2*MxScaleSuperFmtManBits+3:0] scale_in_prod_mant_d, scale_in_prod_mant_q;
-  logic [NrIn-1:0]                                                   scale_in_prod_sign_d, scale_in_prod_sign_q;
+  logic [NrIn-1:0][2*InSuperFmtManBits+2*ScaleSuperFmtManBits+3:0] scale_in_prod_mant_d, scale_in_prod_mant_q;
+  logic [NrIn-1:0]                                                 scale_in_prod_sign_d, scale_in_prod_sign_q;
 
-  logic                                                              scale_in_prod_valid_d, scale_in_prod_valid_q;
+  logic                                                            scale_in_prod_valid_d, scale_in_prod_valid_q;
 
   for (genvar i = 0; i < NrIn; i++) begin : gen_scale_input_products
-    assign scale_in_prod_mant_d[i] = {in_prod_mant_carry[i],in_prod_mant_no_carry[i]}*scale_prod_mant_q[i/MxGroupSize];
-    assign scale_in_prod_sign_d[i] = in_prod_sign[i] ^ scale_prod_sign_q[i/MxGroupSize];
+    assign scale_in_prod_mant_d[i] = {in_prod_mant_carry[i],in_prod_mant_no_carry[i]}*scale_prod_mant_q[i/BlockSize];
+    assign scale_in_prod_sign_d[i] = in_prod_sign[i] ^ scale_prod_sign_q[i/BlockSize];
   end
 
   assign scale_in_prod_valid_d = prod_mant_valid_q;
 
-  `AUTEUR_PIPE(scale_in_prod_mant_pipe, PipeCfg.input_path.mantissa_path.scale_input_products, logic [NrIn-1:0][2*InSuperFmtManBits+2*MxScaleSuperFmtManBits+3:0], scale_in_prod_mant_d, scale_in_prod_mant_q, scale_in_prod_valid_d)
-  `AUTEUR_PIPE(scale_in_prod_sign_pipe, PipeCfg.input_path.mantissa_path.scale_input_products, logic [NrIn-1:0]                                                  , scale_in_prod_sign_d, scale_in_prod_sign_q, scale_in_prod_valid_d)
+  `AUTEUR_PIPE(scale_in_prod_mant_pipe, PipeCfg.input_path.mantissa_path.scale_input_products, logic [NrIn-1:0][2*InSuperFmtManBits+2*ScaleSuperFmtManBits+3:0], scale_in_prod_mant_d, scale_in_prod_mant_q, scale_in_prod_valid_d)
+  `AUTEUR_PIPE(scale_in_prod_sign_pipe, PipeCfg.input_path.mantissa_path.scale_input_products, logic [NrIn-1:0]                                                , scale_in_prod_sign_d, scale_in_prod_sign_q, scale_in_prod_valid_d)
   `AUTEUR_PIPE_VALID(scale_in_prod_valid_pipe, PipeCfg.input_path.mantissa_path.scale_input_products, scale_in_prod_valid_d, scale_in_prod_valid_q)
 
 
@@ -858,14 +856,14 @@ module auteur_dotp
 
   logic signed [NrIn-1:0][MantAccFracWidth+4:0] scale_in_prod_mant_signed;
 
-  typedef logic [OutSuperFmtManBits+1:0]                           y_mant_signed_t;
-  typedef logic [2*InSuperFmtManBits+2*MxScaleSuperFmtManBits+3:0] scale_in_prod_mant_t;
+  typedef logic [OutSuperFmtManBits+1:0]                         y_mant_signed_t;
+  typedef logic [2*InSuperFmtManBits+2*ScaleSuperFmtManBits+3:0] scale_in_prod_mant_t;
 
   always_comb begin : sum_mantissae
     mant_acc_d = signed'({y_sign_acc_q ? {1'b1,y_flags_q.is_denormal,~y_mant_acc_q}+1'b1 : {1'b0,~y_flags_q.is_denormal,y_mant_acc_q},{(AccRoundBits){1'b0}}}) >>> y_shift_q;
 
     for (int unsigned i = 0; i < NrIn; i++) begin
-      scale_in_prod_mant_signed[i] =  signed'({scale_in_prod_sign_q[i] ? ~scale_in_prod_mant_q[i]+1'b1 : {1'b0,scale_in_prod_mant_q[i]},{(MantAccFracWidth-2*InSuperFmtManBits-2*MxScaleSuperFmtManBits){1'b0}}});
+      scale_in_prod_mant_signed[i] =  signed'({scale_in_prod_sign_q[i] ? ~scale_in_prod_mant_q[i]+1'b1 : {1'b0,scale_in_prod_mant_q[i]},{(MantAccFracWidth-2*InSuperFmtManBits-2*ScaleSuperFmtManBits){1'b0}}});
       mant_acc_d                   += signed'(scale_in_prod_mant_signed[i]) >>> in_shifts_final_q[i];
     end
   end
@@ -883,7 +881,7 @@ module auteur_dotp
 
   logic res_is_infinity_d, res_is_nan_d, res_is_infinity_q, res_is_nan_q;
 
-  logic [NrMxGroups-1:0] positive_infinity_mask, negative_infinity_mask;
+  logic [NrBlocks-1:0] positive_infinity_mask, negative_infinity_mask;
 
   always_comb begin : final_exception_detector
     res_is_infinity_d = 1'b0;
@@ -945,11 +943,9 @@ module auteur_dotp
   );
 
   assign {final_exp_overflow,final_exp_pre_overflow} = mant_acc_lz < MantAccIntWidth ? exp_acc_q + (MantAccIntWidth - 1 - mant_acc_lz) : exp_acc_q - (mant_acc_lz - MantAccIntWidth + 1);
-  //assign final_exp_d                                 = mant_acc_is_zero ? '0 : maximum_exponent_overflow_q ? '1 : (final_exp_overflow ? (mant_acc_lz < MantAccIntWidth ? '1 : '0) : final_exp_pre_overflow);
   assign final_exp_d                                 = final_exp_pre_overflow;
 
   assign final_mant_pre_round = mant_acc_lz < MantAccIntWidth ? mant_acc_unsigned >> (MantAccIntWidth - 1 - mant_acc_lz) : mant_acc_unsigned << (mant_acc_lz - MantAccIntWidth + 1);
-  //assign final_mant_d         = (maximum_exponent_overflow_q || final_exp_overflow) ? '0 : final_mant_pre_round[OutSuperFmtManBits:AccRoundBits] + final_mant_pre_round[AccRoundBits-1];
   assign final_mant_d         = final_mant_pre_round[OutSuperFmtManBits+AccRoundBits-1:AccRoundBits] + final_mant_pre_round[AccRoundBits-1];
 
   assign final_sign_d         = mant_acc_q[MantAccWidth-1];

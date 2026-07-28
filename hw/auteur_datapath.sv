@@ -16,20 +16,21 @@ module auteur_datapath
   parameter int unsigned    WriteDataWidth = 1,
   parameter int unsigned    GroupSizeX = 1,
   parameter int unsigned    GroupSizeW = 1,
-  parameter int unsigned    IntercoWidth = 1,
+  // Number of CEs that share the same output buffer
+  parameter int unsigned    NrCesPerOutputBuffer = 1,
 
   parameter int unsigned    BaseInFmtWidth = 1,
   parameter int unsigned    ScaleFmtWidth = 1,
   parameter int unsigned    OutFmtWidth = 1,
   parameter int unsigned    NrIn = 1,
   parameter int unsigned    NrMaxJoins = 0,
-  parameter int unsigned    MxGroupSize = NrIn,
+  parameter int unsigned    BlockSize = NrIn,
   parameter int unsigned    InSuperFmtManBits = 1,
   parameter int unsigned    InSuperFmtExpBits = 1,
   parameter int unsigned    OutSuperFmtManBits = 1,
   parameter int unsigned    OutSuperFmtExpBits = 1,
-  parameter int unsigned    MxScaleSuperFmtManBits = 1,
-  parameter int unsigned    MxScaleSuperFmtExpBits = 1,
+  parameter int unsigned    ScaleSuperFmtManBits = 1,
+  parameter int unsigned    ScaleSuperFmtExpBits = 1,
   parameter bit             InManUnnorm = 0,
   parameter int unsigned    AccRoundBits = 1,
   parameter dotp_pipe_cfg_t PipeCfg = '{default: '0},
@@ -42,7 +43,7 @@ module auteur_datapath
 
   localparam int unsigned MaxInWidth     = 1<<NrMaxJoins,
   localparam int unsigned InPackWidth    = MaxInWidth * (1 + InSuperFmtExpBits + InSuperFmtManBits + InManUnnorm),
-  localparam int unsigned ScalePackWidth = (1 + MxScaleSuperFmtExpBits + MxScaleSuperFmtManBits),
+  localparam int unsigned ScalePackWidth = (1 + ScaleSuperFmtExpBits + ScaleSuperFmtManBits),
   localparam int unsigned OutPackWidth   = (1 + OutSuperFmtExpBits + OutSuperFmtManBits),
 
   parameter logic [InPackWidth-1:0][NrInFormats-1:0][31:0]       InFormatMapTable = '{default: '0},
@@ -57,17 +58,17 @@ module auteur_datapath
   parameter int unsigned    InputBufferBanks = 2,
   parameter bit             InputBufferLatches = 0,
 
-  localparam int unsigned InputBufferDepth = InputBufferTotDepth / NrGroupsX,  // FIXME: Support NrGroupsX =/= NrGroupsW
+  localparam int unsigned InputBufferDepth = InputBufferTotDepth / NrGroupsX,  // FIXME: Support NrGroupsX =/= NrGroupsW by using two different parameters for X and W
 
   // FIXME: All the parameters in this section are only needed to calculate the final address widths
-  localparam int unsigned NrMxGroups = NrIn / MxGroupSize,
+  localparam int unsigned NrBlocks = NrIn / BlockSize,
 
-  localparam int unsigned NrOutputBuffersW = GroupSizeW / IntercoWidth,
+  localparam int unsigned NrOutputBuffersW = GroupSizeW / NrCesPerOutputBuffer,
 
-  localparam int unsigned InputBufferWideWordWidth = NrIn * BaseInFmtWidth + NrMxGroups * ScaleFmtWidth,
+  localparam int unsigned InputBufferWideWordWidth = NrIn * BaseInFmtWidth + NrBlocks * ScaleFmtWidth,
   localparam int unsigned InputBufferNarrowWordWidth = WriteDataWidth > InputBufferWideWordWidth ? InputBufferWideWordWidth : WriteDataWidth,
 
-  localparam int unsigned OutputBufferDataWidth = OutFmtWidth*IntercoWidth,
+  localparam int unsigned OutputBufferDataWidth = OutFmtWidth*NrCesPerOutputBuffer,
 
   localparam int unsigned NrInputBufferReqs = WriteDataWidth / InputBufferNarrowWordWidth,
 
@@ -144,7 +145,7 @@ module auteur_datapath
   output read_rsp_t  [NrGroupsW-1:0] read_rsp_o
 );
 
-  localparam int unsigned InputBufferWideWord = NrIn * BaseInFmtWidth + NrMxGroups * ScaleFmtWidth;
+  localparam int unsigned InputBufferWideWord = NrIn * BaseInFmtWidth + NrBlocks * ScaleFmtWidth;
   localparam int unsigned CtrlTreeMaxWidth    = CtrlTreeWidth ** CtrlTreeDepth;
 
   ctrl_t [CtrlTreeDepth:0][CtrlTreeMaxWidth-1:0] ctrl_tree;
@@ -251,19 +252,19 @@ module auteur_datapath
         .GroupIdWidth (GroupIdWidth),
         .GroupSizeX (GroupSizeX),
         .GroupSizeW (GroupSizeW),
-        .IntercoWidth (IntercoWidth),
+        .NrCesPerOutputBuffer (NrCesPerOutputBuffer),
         .BaseInFmtWidth (BaseInFmtWidth),
         .ScaleFmtWidth (ScaleFmtWidth),
         .OutFmtWidth (OutFmtWidth),
         .NrIn (NrIn),
         .NrMaxJoins (NrMaxJoins),
-        .MxGroupSize (MxGroupSize),
+        .BlockSize (BlockSize),
         .InSuperFmtManBits (InSuperFmtManBits),
         .InSuperFmtExpBits (InSuperFmtExpBits),
         .OutSuperFmtManBits (OutSuperFmtManBits),
         .OutSuperFmtExpBits (OutSuperFmtExpBits),
-        .MxScaleSuperFmtManBits (MxScaleSuperFmtManBits),
-        .MxScaleSuperFmtExpBits (MxScaleSuperFmtExpBits),
+        .ScaleSuperFmtManBits (ScaleSuperFmtManBits),
+        .ScaleSuperFmtExpBits (ScaleSuperFmtExpBits),
         .InManUnnorm (InManUnnorm),
         .AccRoundBits (AccRoundBits),
         .PipeCfg (PipeCfg),

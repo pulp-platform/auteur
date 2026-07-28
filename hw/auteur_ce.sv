@@ -12,13 +12,13 @@ module auteur_ce
   parameter int unsigned    OutFmtWidth = 1,
   parameter int unsigned    NrIn = 1,
   parameter int unsigned    NrMaxJoins = 1,
-  parameter int unsigned    MxGroupSize = NrIn,
+  parameter int unsigned    BlockSize = NrIn,
   parameter int unsigned    InSuperFmtManBits = 1,
   parameter int unsigned    InSuperFmtExpBits = 1,
   parameter int unsigned    OutSuperFmtManBits = 1,
   parameter int unsigned    OutSuperFmtExpBits = 1,
-  parameter int unsigned    MxScaleSuperFmtManBits = 1,
-  parameter int unsigned    MxScaleSuperFmtExpBits = 1,
+  parameter int unsigned    ScaleSuperFmtManBits = 1,
+  parameter int unsigned    ScaleSuperFmtExpBits = 1,
   parameter bit             InManUnnorm = 0,
   parameter int unsigned    AccRoundBits = 1,
   parameter int unsigned    YDelay = 0,
@@ -33,14 +33,14 @@ module auteur_ce
 
   localparam int unsigned MaxInWidth     = 1<<NrMaxJoins,
   localparam int unsigned InPackWidth    = MaxInWidth * (1 + InSuperFmtExpBits + InSuperFmtManBits + InManUnnorm),
-  localparam int unsigned ScalePackWidth = (1 + MxScaleSuperFmtExpBits + MxScaleSuperFmtManBits),
+  localparam int unsigned ScalePackWidth = (1 + ScaleSuperFmtExpBits + ScaleSuperFmtManBits),
   localparam int unsigned OutPackWidth   = (1 + OutSuperFmtExpBits + OutSuperFmtManBits),
 
-  parameter logic [InPackWidth-1:0][NrInFormats-1:0][31:0]       InFormatMapTable = '{default: '0},
+  parameter logic [InPackWidth-1:0][NrInFormats-1:0][31:0]       InFormatMapTable    = '{default: '0},
   parameter logic [ScalePackWidth-1:0][NrScaleFormats-1:0][31:0] ScaleFormatMapTable = '{default: '0},
-  parameter logic [OutPackWidth-1:0][NrOutFormats-1:0][31:0]     OutFormatMapTable = '{default: '0},
+  parameter logic [OutPackWidth-1:0][NrOutFormats-1:0][31:0]     OutFormatMapTable   = '{default: '0},
 
-  localparam int unsigned NrMxGroups   = NrIn/MxGroupSize,
+  localparam int unsigned NrBlocks     = NrIn/BlockSize,
   localparam int unsigned NrInMaxWidth = NrIn>>NrMaxJoins,
 
   localparam type fmt_cfg_t = struct packed {
@@ -60,8 +60,8 @@ module auteur_ce
   input  logic [NrInMaxWidth-1:0][BaseInFmtWidth*MaxInWidth-1:0] w_i,
 
   input  logic                                                   scale_valid_i,
-  input  logic [NrMxGroups-1:0][ScaleFmtWidth-1:0]               x_scale_i,
-  input  logic [NrMxGroups-1:0][ScaleFmtWidth-1:0]               w_scale_i,
+  input  logic [NrBlocks-1:0][ScaleFmtWidth-1:0]                 x_scale_i,
+  input  logic [NrBlocks-1:0][ScaleFmtWidth-1:0]                 w_scale_i,
 
   input  logic                                                   y_valid_i,
   input  logic [OutFmtWidth-1:0]                                 y_i,
@@ -76,9 +76,9 @@ module auteur_ce
   };
 
   localparam type mx_scale_super_fmt_t = struct packed {
-    logic                              sign;
-    logic [MxScaleSuperFmtExpBits-1:0] exponent;
-    logic [MxScaleSuperFmtManBits-1:0] mantissa;
+    logic                            sign;
+    logic [ScaleSuperFmtExpBits-1:0] exponent;
+    logic [ScaleSuperFmtManBits-1:0] mantissa;
   };
 
   localparam type out_super_fmt_t = struct packed {
@@ -94,11 +94,11 @@ module auteur_ce
   dotp_cfg_t dotp_cfg;
 
   in_super_fmt_t [NrInMaxWidth-1:0][MaxInWidth-1:0] x_dotp, w_dotp;
-  mx_scale_super_fmt_t [NrMxGroups-1:0]             x_scale_dotp, w_scale_dotp;
+  mx_scale_super_fmt_t [NrBlocks-1:0]               x_scale_dotp, w_scale_dotp;
   out_super_fmt_t                                   y_dotp, z_dotp;
 
   fp_flags_t [NrInMaxWidth-1:0][MaxInWidth-1:0] x_flags, w_flags;
-  fp_flags_t [NrMxGroups-1:0]                   x_scale_flags, w_scale_flags;
+  fp_flags_t [NrBlocks-1:0]                     x_scale_flags, w_scale_flags;
   fp_flags_t                                    y_flags, z_flags;
 
   auteur_packer #(
@@ -136,13 +136,13 @@ module auteur_ce
   );
 
   auteur_packer #(
-    .NrIn (NrMxGroups),
+    .NrIn (NrBlocks),
     .NrMaxJoins (0),
     .BaseInFmtWidth (ScaleFmtWidth),
     .NrFormats (NrScaleFormats),
     .InFpEncoding (ScaleFpEncoding),
-    .OutFmtManBits (MxScaleSuperFmtManBits),
-    .OutFmtExpBits (MxScaleSuperFmtExpBits),
+    .OutFmtManBits (ScaleSuperFmtManBits),
+    .OutFmtExpBits (ScaleSuperFmtExpBits),
     .OutManUnnorm (0),
     .FormatMapTable (ScaleFormatMapTable)
   ) i_x_scale_packer (
@@ -153,13 +153,13 @@ module auteur_ce
   );
 
   auteur_packer #(
-    .NrIn (NrMxGroups),
+    .NrIn (NrBlocks),
     .NrMaxJoins (0),
     .BaseInFmtWidth (ScaleFmtWidth),
     .NrFormats (NrScaleFormats),
     .InFpEncoding (ScaleFpEncoding),
-    .OutFmtManBits (MxScaleSuperFmtManBits),
-    .OutFmtExpBits (MxScaleSuperFmtExpBits),
+    .OutFmtManBits (ScaleSuperFmtManBits),
+    .OutFmtExpBits (ScaleSuperFmtExpBits),
     .OutManUnnorm (0),
     .FormatMapTable (ScaleFormatMapTable)
   ) i_w_scale_packer (
@@ -191,13 +191,13 @@ module auteur_ce
   auteur_dotp #(
     .NrIn (NrIn),
     .NrMaxJoins (NrMaxJoins),
-    .MxGroupSize (MxGroupSize),
+    .BlockSize (BlockSize),
     .InSuperFmtManBits (InSuperFmtManBits),
     .InSuperFmtExpBits (InSuperFmtExpBits),
     .OutSuperFmtManBits (OutSuperFmtManBits),
     .OutSuperFmtExpBits (OutSuperFmtExpBits),
-    .MxScaleSuperFmtManBits (MxScaleSuperFmtManBits),
-    .MxScaleSuperFmtExpBits (MxScaleSuperFmtExpBits),
+    .ScaleSuperFmtManBits (ScaleSuperFmtManBits),
+    .ScaleSuperFmtExpBits (ScaleSuperFmtExpBits),
     .InManUnnorm (InManUnnorm),
     .AccRoundBits (AccRoundBits),
     .YDelay (YDelay),

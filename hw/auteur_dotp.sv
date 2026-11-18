@@ -8,7 +8,9 @@ module auteur_dotp
   import auteur_pkg::*;
 #(
   parameter int unsigned    NrIn = 1,
-  parameter int unsigned    NrMaxJoins = 1,
+  parameter int unsigned    NrJoinStages = 1,
+  localparam int unsigned   NrJoinsPerStageWidth = NrJoinStages != 0 ? NrJoinStages : 1,
+  parameter int unsigned    NrJoinsPerStage [NrJoinsPerStageWidth-1:0] = '{default: 2},
   parameter int unsigned    BlockSize = NrIn,
   parameter int unsigned    InSuperFmtManBits = 1,
   parameter int unsigned    InSuperFmtExpBits = 1,
@@ -46,7 +48,7 @@ module auteur_dotp
     logic [ScaleSuperFmtManBits-1:0] mantissa;
   },
   localparam type dotp_cfg_t = struct packed {
-    logic [$clog2(NrMaxJoins):0] num_joins;
+    logic [$clog2(NrJoinStages):0] num_joins;
   }
 ) (
   input  logic                            clk_i,
@@ -74,13 +76,23 @@ module auteur_dotp
   output out_super_fmt_t                  z_o,
   output fp_flags_t                       z_flags_o
 );
+  function automatic int unsigned get_max_stage_width();
+    int unsigned res = 0;
+
+    for (int unsigned s = 0; s < NrJoinsPerStageWidth; s++) begin
+      res = res < NrJoinsPerStage[s] ? NrJoinsPerStage[s] : res;
+    end
+
+    return res;
+  endfunction
+
   localparam int unsigned MantAccFracWidth = OutSuperFmtManBits + AccRoundBits;
   localparam int unsigned MantAccIntWidth  = $clog2(NrIn+1) + 3 + 1; // Maximum possible number of carry bits + largest mantissa overflow + implicit 1
   localparam int unsigned MantAccWidth     = 1 + MantAccIntWidth + MantAccFracWidth; // We add the sign bit
   localparam int unsigned ShiftAmountWidth = $clog2(3+1+MantAccFracWidth);
-  localparam int unsigned MaxInWidth       = 1<<NrMaxJoins;
-  localparam int unsigned NrInMaxWidth     = NrIn>>NrMaxJoins;
-  localparam int unsigned BlockSizeMax     = BlockSize>>NrMaxJoins;
+  localparam int unsigned MaxInWidth       = get_max_width(NrJoinsPerStage, NrJoinStages);
+  localparam int unsigned NrInMaxWidth     = NrIn / MaxInWidth;
+  localparam int unsigned MaxStageWidth    = get_max_stage_width();
 
   localparam int unsigned OutSuperFmtBias = (1<<(OutSuperFmtExpBits-1)) - 1;
 
@@ -153,7 +165,7 @@ module auteur_dotp
     in_prod_any_negative_infinity_d = '0;
     in_prod_any_zero_d              = '0;
 
-    if (cfg_mant_inputs_q.num_joins <= NrMaxJoins) begin
+    if (cfg_mant_inputs_q.num_joins <= NrJoinStages) begin
       for (int unsigned b = 0; b < NrBlocks; b++) begin
         for (int unsigned e = 0; e < BlockSize; e++) begin
           in_is_infinity_d[b] |= x_flags_q[b*BlockSize+e].is_infinity | w_flags_q[b*BlockSize+e].is_infinity;
@@ -176,21 +188,32 @@ module auteur_dotp
   `AUTEUR_PIPE(in_prod_any_zero_pipe             , get_input_flags_delay(PipeCfg), logic [NrBlocks-1:0], in_prod_any_zero_d             , in_prod_any_zero_q             , in_valid_mant_q)
 
 
-  logic [NrMaxJoins:0][NrIn-1:0][2*InSuperFmtManBits-1:0] prod_mant_no_carry;
-  logic [NrMaxJoins:0][NrIn-1:0][1:0]                     prod_mant_carry;
+  function automatic logic [NrJoinStages:0][31:0] gen_leading_bit_positions();
+    logic [NrJoinStages:0][31:0] res;
 
-  logic [NrMaxJoins:0][NrIn-1:0][InSuperFmtExpBits-1:0] prod_exp_no_carry;
-  logic [NrMaxJoins:0][NrIn-1:0]                        prod_exp_carry;
+    for (int unsigned s = 0; s <= NrJoinStages; s++)
+      res[s] = get_max_width(NrJoinsPerStage, s);
 
-  logic [NrMaxJoins:0][NrIn-1:0] prod_sign;
+    return res;
+  endfunction
+
+  localparam logic [NrJoinStages:0][31:0] LeadingBitPositions = gen_leading_bit_positions();
+
+  logic [NrJoinStages:0][NrIn-1:0][2*InSuperFmtManBits-1:0] prod_mant_no_carry;
+  logic [NrJoinStages:0][NrIn-1:0][1:0]                     prod_mant_carry;
+
+  logic [NrJoinStages:0][NrIn-1:0][InSuperFmtExpBits-1:0] prod_exp_no_carry;
+  logic [NrJoinStages:0][NrIn-1:0]                        prod_exp_carry;
+
+  logic [NrJoinStages:0][NrIn-1:0] prod_sign;
 
   for (genvar i = 0; i < NrIn; i++) begin : gen_initial_products
     logic x_lead, w_lead;
 
     // If the input mantissa is normalized, we statically set the leading bit
     if (InManUnnorm == 0) begin
-      assign x_lead = (i+1)%(1<<cfg_mant_inputs_q.num_joins) == 0 ? ~x_flags_q[i].is_denormal : 1'b0;
-      assign w_lead = (i+1)%(1<<cfg_mant_inputs_q.num_joins) == 0 ? ~w_flags_q[i].is_denormal : 1'b0;
+      assign x_lead = (i+1)%(LeadingBitPositions[cfg_mant_inputs_q.num_joins]) == 0 ? ~x_flags_q[i].is_denormal : 1'b0;
+      assign w_lead = (i+1)%(LeadingBitPositions[cfg_mant_inputs_q.num_joins]) == 0 ? ~w_flags_q[i].is_denormal : 1'b0;
     end else begin
       assign x_lead = x_mant_q[i][InSuperFmtManBits];
       assign w_lead = w_mant_q[i][InSuperFmtManBits];
@@ -201,76 +224,131 @@ module auteur_dotp
     assign prod_sign[0][i] = x_sign_q[i] ^ w_sign_q[i];
   end
 
-  for (genvar s = 0; s < NrMaxJoins; s++) begin : gen_join_stages
-    localparam int unsigned JoinWidth = 1<<s;
+  typedef int unsigned mant_shifts_t [MaxStageWidth*(MaxStageWidth-1)-1:0];
 
-    for (genvar c = 0; c < NrIn/JoinWidth; c+=2) begin : gen_per_element_join
+  // Generate the required shifts to align expanded products
+  function automatic mant_shifts_t gen_shifts(input int stage_width);
+    mant_shifts_t res = '{default: '0};
+
+    for (int unsigned i = 0; i < stage_width; i++) begin
+      for (int unsigned j = 0; j < stage_width-1; j++) begin
+        res[i*(stage_width-1)+j] = i + j + (j >= i);
+      end
+    end
+
+    return res;
+  endfunction
+
+  for (genvar s = 0; s < NrJoinStages; s++) begin : gen_join_stages
+    localparam int unsigned JoinWidth  = get_max_width(NrJoinsPerStage, s);
+    localparam int unsigned StageWidth = NrJoinsPerStage[s];
+
+    localparam int unsigned ProdMantShifts [MaxStageWidth*(MaxStageWidth-1)-1:0] = gen_shifts(StageWidth);
+
+    for (genvar c = 0; c < NrIn/JoinWidth; c+=StageWidth) begin : gen_per_element_join
       localparam int unsigned InCatWidth  = InManUnnorm == 0 ? InSuperFmtManBits*JoinWidth + 1 : (InSuperFmtManBits+InManUnnorm)*JoinWidth;
       localparam int unsigned InProdWidth = InManUnnorm == 0 ? 2*InCatWidth - 1 : 2*InCatWidth;
 
-      logic [InCatWidth-1:0]  x_cat_l, x_cat_h, w_cat_l, w_cat_h;
-      logic [InProdWidth-1:0] prod_mant_lh, prod_mant_hl;
+      logic [StageWidth-1:0][InCatWidth-1:0]  x_cat, w_cat;
+
+      logic [StageWidth*(StageWidth-1)-1:0][InProdWidth-1:0] prod_mant;
+
       logic                   mant_carry;
       logic                   exp_carry;
 
-      always_comb begin : concat_mantissae
-        if (InManUnnorm == 0) begin
-          for (int unsigned i = 0; i < JoinWidth; i++) begin
-            x_cat_l[i*InSuperFmtManBits+:InSuperFmtManBits] = x_mant_q[c*JoinWidth+i];
-            w_cat_l[i*InSuperFmtManBits+:InSuperFmtManBits] = w_mant_q[c*JoinWidth+i];
-            x_cat_h[i*InSuperFmtManBits+:InSuperFmtManBits] = x_mant_q[(c+1)*JoinWidth+i];
-            w_cat_h[i*InSuperFmtManBits+:InSuperFmtManBits] = w_mant_q[(c+1)*JoinWidth+i];
-          end
+      if (InManUnnorm == 0) begin
+        always_comb begin : concat_mantissae
+          for (int unsigned e = 0; e < StageWidth; e++) begin
+            for (int unsigned i = 0; i < JoinWidth; i++) begin
+              x_cat[e][i*InSuperFmtManBits+:InSuperFmtManBits] = x_mant_q[(c+e)*JoinWidth+i];
+              w_cat[e][i*InSuperFmtManBits+:InSuperFmtManBits] = w_mant_q[(c+e)*JoinWidth+i];
+            end
 
-          x_cat_l[InSuperFmtManBits*JoinWidth] = 1'b0;
-          w_cat_l[InSuperFmtManBits*JoinWidth] = 1'b0;
-          x_cat_h[InSuperFmtManBits*JoinWidth] = ((c+2)*JoinWidth)%(1<<cfg_mant_inputs_q.num_joins) == 0 ? 1'b1 : 1'b0;
-          w_cat_h[InSuperFmtManBits*JoinWidth] = ((c+2)*JoinWidth)%(1<<cfg_mant_inputs_q.num_joins) == 0 ? 1'b1 : 1'b0;
-        end else begin
-          x_cat_l = x_mant_q[(c+1)*JoinWidth-1:c*JoinWidth];
-          w_cat_l = w_mant_q[(c+1)*JoinWidth-1:c*JoinWidth];
-          x_cat_h = x_mant_q[(c+2)*JoinWidth-1:(c+1)*JoinWidth];
-          w_cat_h = w_mant_q[(c+2)*JoinWidth-1:(c+1)*JoinWidth];
+            if (e != StageWidth-1) begin
+              x_cat[e][InSuperFmtManBits*JoinWidth] = 1'b0;
+              w_cat[e][InSuperFmtManBits*JoinWidth] = 1'b0;
+            end else begin
+              x_cat[e][InSuperFmtManBits*JoinWidth] = ((c+StageWidth)*JoinWidth)%(LeadingBitPositions[cfg_mant_inputs_q.num_joins]) == 0 ? 1'b1 : 1'b0;
+              w_cat[e][InSuperFmtManBits*JoinWidth] = ((c+StageWidth)*JoinWidth)%(LeadingBitPositions[cfg_mant_inputs_q.num_joins]) == 0 ? 1'b1 : 1'b0;
+            end
+          end
+        end
+      end else begin
+        for (genvar e = 0; e < StageWidth; e++) begin : concat_mantissae
+          assign x_cat[e] = x_mant_q[(c+e+1)*JoinWidth-1:(c+e)*JoinWidth];
+          assign w_cat[e] = w_mant_q[(c+e+1)*JoinWidth-1:(c+e)*JoinWidth];
         end
       end
 
-      for (genvar i = c*JoinWidth; i < (c+2)*JoinWidth-1; i++) begin : assign_unchanged_carries
+      for (genvar i = c*JoinWidth; i < (c+StageWidth)*JoinWidth-1; i++) begin : assign_unchanged_carries
         if (InManUnnorm == 0) begin
           assign prod_mant_carry[s+1][i] = prod_mant_carry[s][i];
         end
 
-        assign prod_exp_carry[s+1][i] = i == (c+1)*JoinWidth-1 ? (cfg_exp_inputs_q.num_joins <= s ? prod_exp_carry[s][i] : 1'b0) : prod_exp_carry[s][i];
+        assign prod_exp_carry[s+1][i] = (i+1) % (JoinWidth) == 0 ? (cfg_exp_inputs_q.num_joins <= s ? prod_exp_carry[s][i] : 1'b0) : prod_exp_carry[s][i];
       end
 
-      assign prod_mant_lh = cfg_mant_inputs_q.num_joins > s ? x_cat_l*w_cat_h : '0;
-      assign prod_mant_hl = cfg_mant_inputs_q.num_joins > s ? x_cat_h*w_cat_l : '0;
+      for (genvar i = 0; i < StageWidth; i++) begin
+        for (genvar j = 0; j < StageWidth-1; j++) begin
+          assign prod_mant[i*(StageWidth-1)+j] = cfg_mant_inputs_q.num_joins > s ? x_cat[i] * w_cat[j + (j >= i)] : '0;
+        end
+      end
 
       if (InManUnnorm == 0) begin : gen_norm_products
-        assign {mant_carry,prod_mant_no_carry[s+1][(c+2)*JoinWidth-1:c*JoinWidth]} = prod_mant_no_carry[s][(c+2)*JoinWidth-1:c*JoinWidth] + {prod_mant_lh,{(InSuperFmtManBits*JoinWidth){1'b0}}} + {prod_mant_hl,{(InSuperFmtManBits*JoinWidth){1'b0}}};
-        assign prod_mant_carry[s+1][(c+2)*JoinWidth-1]                             = prod_mant_carry[s][(c+2)*JoinWidth-1] + mant_carry;
-      end else begin : gen_denorm_products
-        logic [2*JoinWidth-1:0][2*InSuperFmtManBits+1:0] prod_mant_packed;
-        logic [2*JoinWidth-1:0][2*InSuperFmtManBits+1:0] res_packed;
 
-        for (genvar e = 0; e < 2*JoinWidth; e++) begin : pack_prod_mant
+        always_comb begin
+          {mant_carry,prod_mant_no_carry[s+1][(c+StageWidth)*JoinWidth-1:c*JoinWidth]} = prod_mant_no_carry[s][(c+StageWidth)*JoinWidth-1:c*JoinWidth];
+
+          for (int unsigned i = 0; i < StageWidth*(StageWidth-1); i++) begin
+            // Here we have InCatWidth-1 since we subtract the implicit 1 contribution from the total width
+            {mant_carry,prod_mant_no_carry[s+1][(c+StageWidth)*JoinWidth-1:c*JoinWidth]} += prod_mant[i] << ((InCatWidth-1)*ProdMantShifts[i]);
+          end
+        end
+
+        assign prod_mant_carry[s+1][(c+StageWidth)*JoinWidth-1] = prod_mant_carry[s][(c+StageWidth)*JoinWidth-1] + mant_carry;
+      end else begin : gen_denorm_products
+        logic [StageWidth*JoinWidth-1:0][2*InSuperFmtManBits+1:0] prod_mant_packed;
+        logic [StageWidth*JoinWidth-1:0][2*InSuperFmtManBits+1:0] mant_res_packed;
+
+        for (genvar e = 0; e < StageWidth*JoinWidth; e++) begin : pack_prod_mant
           assign prod_mant_packed[e] = {prod_mant_carry[s][c*JoinWidth+e],prod_mant_no_carry[s][c*JoinWidth+e]};
         end
 
-        assign res_packed = prod_mant_packed + {prod_mant_lh,{(InCatWidth){1'b0}}} + {prod_mant_hl,{(InCatWidth){1'b0}}};
+        always_comb begin
+          mant_res_packed = prod_mant_packed;
 
-        for (genvar e = 0; e < 2*JoinWidth; e++) begin : unpack_prod_mant
-          assign {prod_mant_carry[s+1][c*JoinWidth+e], prod_mant_no_carry[s+1][c*JoinWidth+e]} = res_packed[e];
+          for (int unsigned i = 0; i < StageWidth*(StageWidth-1); i++) begin
+            mant_res_packed += {prod_mant[i],{(InCatWidth*ProdMantShifts[i]){1'b0}}};
+          end
+        end
+
+        for (genvar e = 0; e < StageWidth*JoinWidth; e++) begin : unpack_prod_mant
+          assign {prod_mant_carry[s+1][c*JoinWidth+e], prod_mant_no_carry[s+1][c*JoinWidth+e]} = mant_res_packed[e];
         end
       end
 
-      assign {exp_carry,prod_exp_no_carry[s+1][(c+2)*JoinWidth-1:c*JoinWidth]} = prod_exp_no_carry[s][(c+2)*JoinWidth-1:c*JoinWidth] + (cfg_exp_inputs_q.num_joins > s ? {prod_exp_carry[s][(c+2)*JoinWidth-JoinWidth-1],{(InSuperFmtExpBits*JoinWidth){1'b0}}} : '0);
-      assign prod_exp_carry[s+1][(c+2)*JoinWidth-1]                            = prod_exp_carry[s][(c+2)*JoinWidth-1] + exp_carry;
+      logic [StageWidth*JoinWidth*InSuperFmtExpBits:0] exp_res_packed;
 
-      for (genvar i = c*JoinWidth; i < (c+2)*JoinWidth-1; i++) begin : assign_changed_signs
-        assign prod_sign[s+1][i] = cfg_mant_inputs_q.num_joins > s ? prod_sign[s][(c+2)*JoinWidth-1] : prod_sign[s][i];
+      always_comb begin
+        exp_res_packed = prod_exp_no_carry[s][(c+StageWidth)*JoinWidth-1:c*JoinWidth];
+
+        if (cfg_exp_inputs_q.num_joins > s) begin
+          for (int unsigned i = 0; i < StageWidth-1; i++) begin
+            exp_res_packed += {prod_exp_carry[s][(c+i+1)*JoinWidth-1],{(InSuperFmtExpBits*JoinWidth){1'b0}}} << (InSuperFmtExpBits*JoinWidth*i);
+          end
+        end else begin
+          exp_res_packed = prod_exp_no_carry[s][(c+StageWidth)*JoinWidth-1:c*JoinWidth];
+        end
       end
 
-      assign prod_sign[s+1][(c+2)*JoinWidth-1] = prod_sign[s][(c+2)*JoinWidth-1];
+      assign {exp_carry,prod_exp_no_carry[s+1][(c+StageWidth)*JoinWidth-1:c*JoinWidth]} = exp_res_packed;
+      assign prod_exp_carry[s+1][(c+StageWidth)*JoinWidth-1] = prod_exp_carry[s][(c+StageWidth)*JoinWidth-1] + exp_carry;
+
+      for (genvar i = c*JoinWidth; i < (c+StageWidth)*JoinWidth-1; i++) begin : assign_changed_signs
+        assign prod_sign[s+1][i] = cfg_mant_inputs_q.num_joins > s ? prod_sign[s][(c+StageWidth)*JoinWidth-1] : prod_sign[s][i];
+      end
+
+      assign prod_sign[s+1][(c+StageWidth)*JoinWidth-1] = prod_sign[s][(c+StageWidth)*JoinWidth-1];
     end
   end
 
@@ -290,13 +368,13 @@ module auteur_dotp
   assign prod_mant_valid_d    = in_valid_mant_q;
   assign prod_exp_valid_d     = in_valid_exp_q;
 
-  assign prod_mant_no_carry_d = prod_mant_no_carry[NrMaxJoins];
-  assign prod_mant_carry_d    = prod_mant_carry[NrMaxJoins];
+  assign prod_mant_no_carry_d = prod_mant_no_carry[NrJoinStages];
+  assign prod_mant_carry_d    = prod_mant_carry[NrJoinStages];
 
-  assign prod_exp_no_carry_d  = prod_exp_no_carry[NrMaxJoins];
-  assign prod_exp_carry_d     = prod_exp_carry[NrMaxJoins];
+  assign prod_exp_no_carry_d  = prod_exp_no_carry[NrJoinStages];
+  assign prod_exp_carry_d     = prod_exp_carry[NrJoinStages];
 
-  assign prod_sign_d          = prod_sign[NrMaxJoins];
+  assign prod_sign_d          = prod_sign[NrJoinStages];
 
   assign cfg_exp_input_products_d = cfg_exp_inputs_q;
 
@@ -371,10 +449,10 @@ module auteur_dotp
     `AUTEUR_FIFO(x_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtManBits-1:0], x_scale_mant_fifo_d , x_scale_mant_fifo_q , scale_valid_i, in_valid_mant_scales_fifo)
     `AUTEUR_FIFO(x_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrBlocks-1:0]                     , x_scale_flags_fifo_d, x_scale_flags_fifo_q, scale_valid_i, in_valid_mant_scales_fifo)
   end else begin
-    `AUTEUR_PIPE(x_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0]                            , x_scale_sign_fifo_d , x_scale_sign_fifo_q , scale_valid_i)
-    `AUTEUR_PIPE(x_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_d    , x_scale_exp_fifo_q  , scale_valid_i)
-    `AUTEUR_PIPE(x_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtManBits-1:0], x_scale_mant_fifo_d   , x_scale_mant_fifo_q , scale_valid_i)
-    `AUTEUR_PIPE(x_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrBlocks-1:0]                       , x_scale_flags_fifo_d, x_scale_flags_fifo_q, scale_valid_i)
+    `AUTEUR_PIPE(x_scale_sign_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0]                          , x_scale_sign_fifo_d , x_scale_sign_fifo_q , scale_valid_i)
+    `AUTEUR_PIPE(x_scale_exp_fifo  , get_exp_scales_inputs_margin(PipeCfg)  - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtExpBits-1:0], x_scale_exp_fifo_d  , x_scale_exp_fifo_q  , scale_valid_i)
+    `AUTEUR_PIPE(x_scale_mant_fifo , get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, logic [NrBlocks-1:0][ScaleSuperFmtManBits-1:0], x_scale_mant_fifo_d , x_scale_mant_fifo_q , scale_valid_i)
+    `AUTEUR_PIPE(x_scale_flags_fifo, get_mant_scales_inputs_margin(PipeCfg) - ScalesDelay, fp_flags_t [NrBlocks-1:0]                     , x_scale_flags_fifo_d, x_scale_flags_fifo_q, scale_valid_i)
   end
 
   if (SyncWithFifos) begin
@@ -487,19 +565,51 @@ module auteur_dotp
   `AUTEUR_PIPE_VALID(scale_prod_exp_valid_pipe , PipeCfg.scale_path.exponent_path.scale_product, scale_prod_exp_valid_d , scale_prod_exp_valid_q )
 
 
+  function automatic int unsigned get_narrow_tree_depth();
+    int unsigned res = 0;
+
+    for (int unsigned s = 0; s < NrJoinsPerStageWidth; s++) begin
+      res += $clog2(NrJoinsPerStage[s]);
+    end
+
+    return res;
+  endfunction
+
+  function automatic int unsigned get_auctual_stage(input int unsigned depth);
+    int unsigned res = 0;
+    int unsigned acc = 0;
+
+    for (int unsigned s = 0; s < NrJoinsPerStageWidth; s++) begin
+      acc += $clog2(NrJoinsPerStage[NrJoinsPerStageWidth-s-1]);
+
+      if (depth < acc) begin
+        return res;
+      end else begin
+        res += 1;
+      end
+    end
+
+    return res;
+  endfunction
+
+  localparam int unsigned NarrowTreeDepth = get_narrow_tree_depth();
+
+  // This parameter represents how many MaxInWidth elements fit into one block: number of elements that fit perfectly + leftover left + leftover right
+  localparam int unsigned NrMaxElementsPerBlock = BlockSize / MaxInWidth + 2;
+
   logic [NrBlocks-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0]     max_in_prod_exps;
-  logic [NrInMaxWidth-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] in_shifts_wrt_in_d, in_shifts_wrt_in_q;
+  logic [NrBlocks-1:0][NrMaxElementsPerBlock-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] in_shifts_wrt_in_d, in_shifts_wrt_in_q;
 
   // This function generates the table that contains the indexes of the last comparators for each format.
   // For example, in a format with no joins every single comparator is the last one, while in a format that requires one join only odd comparators are marked as final
-  typedef int unsigned node_table_t [NrMaxJoins:0][MaxInWidth-1:0];
+  typedef int unsigned node_table_t [NrJoinStages:0][MaxInWidth-1:0];
 
   function automatic node_table_t gen_max_tree_last_comp();
-    int unsigned res [NrMaxJoins:0][MaxInWidth-1:0] = '{default: MaxInWidth-1}; // MaxInWidth-1 will always be a last comparator, regardless of the format
+    int unsigned res [NrJoinStages:0][MaxInWidth-1:0] = '{default: MaxInWidth-1}; // MaxInWidth-1 will always be a last comparator, regardless of the format
 
-    for (int unsigned i = 0; i <= NrMaxJoins; i++) begin
+    for (int unsigned i = 0; i <= NrJoinStages; i++) begin
       for (int unsigned c = 0; c < MaxInWidth; c++) begin
-        if ((c+1) % (1<<i) == 0) begin
+        if ((c+1)%(LeadingBitPositions[i]) == 0) begin
           res[i][c] = c;
         end
       end
@@ -508,55 +618,121 @@ module auteur_dotp
     return res;
   endfunction
 
-  localparam int unsigned MaxTreeLastComp [NrMaxJoins:0][MaxInWidth-1:0] = gen_max_tree_last_comp();
+  function automatic int unsigned get_block_offset(input int unsigned block);
+    int unsigned res = 0;
 
-  // Find the maximum exponent for each MX block
-  for (genvar b = 0; b < NrBlocks; b++) begin : gen_blocks_max_trees
-    localparam BlockOffset = b*BlockSize;
+    for (int unsigned b = 0; b < block; b++) begin
+      res += (BlockSize + b * MaxInWidth / NrBlocks) / MaxInWidth;
+    end
 
-    // We assume no supported input format can have more exponent bits than the output super format
-    // max_in_prod_exps_tree_stages uses InSuperFmtExpBits+1 bits rather than InSuperFmtExpBits since the surplus bias has not been subtracted yet
-    logic [$clog2(BlockSizeMax):0][BlockSizeMax-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_tree_stages;
-    logic [NrMaxJoins:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_narrow_tree_stages;
+    return res * MaxInWidth;
+  endfunction
 
-    for (genvar n = 0; n < BlockSize; n += MaxInWidth) begin : gen_max_tree_initial_nodes
-      for (genvar e = 0; e < MaxInWidth; e++) begin : assign_elements
-        assign max_in_prod_exps_tree_stages[0][n>>NrMaxJoins][e] = {in_prod_exp_carry[n+e+BlockOffset],in_prod_exp_no_carry[n+e+BlockOffset]};
+  function automatic int unsigned get_subtree_stride(input int unsigned depth);
+    int unsigned remaining_depth = depth;
+    int unsigned subtree_stages;
+
+    for (int unsigned s = 0; s < NrJoinsPerStageWidth; s++) begin
+      subtree_stages = $clog2(NrJoinsPerStage[NrJoinsPerStageWidth-s-1]);
+
+      if (remaining_depth < subtree_stages) begin
+        return 2**remaining_depth;
+      end else begin
+        remaining_depth -= subtree_stages;
       end
     end
 
-    // The max tree is generated with respect to the largest supported input format (i.e., each node compares 2^NrMaxJoins elements regardless of the format)
+    return 1;
+  endfunction
+
+  localparam int unsigned MaxTreeLastComp [NrJoinStages:0][MaxInWidth-1:0] = gen_max_tree_last_comp();
+
+  // Find the maximum exponent for each MX block
+  for (genvar b = 0; b < NrBlocks; b++) begin : gen_blocks_max_trees
+    // Number of maximum-width elements in a block.
+    // Note that if the number of stages is not a power of 2 (for example when we want to merge 3 FP4 into one FP8) this may end up being non-integer
+    // FIXME? We could make this equal to NrMaxElementsPerBlock
+    localparam int unsigned BlockSizeMax    = 2 ** $clog2((BlockSize + MaxInWidth - 1) / MaxInWidth);
+    // The first multiple of MaxInWidth that is >= BlockSize * b
+    localparam int unsigned BlockOffset     = (BlockSize * b + MaxInWidth - 1) / MaxInWidth * MaxInWidth;
+    localparam int unsigned BlockBoundaryLow   = BlockSize * b;
+    localparam int unsigned BlockBoundaryHigh   = BlockSize * (b+1);
+    // Here "aligned" means with respect to MaxInWidth
+    localparam int unsigned BlockBoundaryLowAligned = BlockBoundaryLow / MaxInWidth * MaxInWidth;
+    localparam int unsigned BlockBoundaryHighAligned = (BlockBoundaryHigh + MaxInWidth - 1) / MaxInWidth * MaxInWidth;
+    localparam int unsigned LeftoverInitial = BlockOffset - b * BlockSize;
+    localparam int unsigned LeftoverFinal   = BlockOffset + (BlockSize + MaxInWidth - 1) / MaxInWidth * MaxInWidth - (b+1) * BlockSize;
+    // This accounts for the extra comparators we may need when joining formats
+    localparam int unsigned ActualBlockSize = (BlockSize / MaxInWidth + (LeftoverInitial != 0) + (LeftoverFinal != 0)) * MaxInWidth;
+    localparam int unsigned ActualNrMaxElements = NrMaxElementsPerBlock - (LeftoverInitial == 0) - (LeftoverFinal == 0);
+    // We assume no supported input format can have more exponent bits than the output super format
+    // max_in_prod_exps_tree_stages uses InSuperFmtExpBits+1 bits rather than InSuperFmtExpBits since the surplus bias has not been subtracted yet
+    logic [$clog2(BlockSizeMax):0][BlockSizeMax-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_tree_stages;
+    logic [NarrowTreeDepth:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_narrow_tree_stages;
+
+    for (genvar n = 0; n < ActualBlockSize; n += MaxInWidth) begin : gen_max_tree_initial_nodes
+      for (genvar e = 0; e < MaxInWidth; e++) begin : assign_elements
+        // We don't need any special mapping if we are completely within the block boundaries
+        if (BlockOffset + n + MaxInWidth <= BlockBoundaryHigh) begin
+          assign max_in_prod_exps_tree_stages[0][n/MaxInWidth][e] = {in_prod_exp_carry[n+e+BlockOffset],in_prod_exp_no_carry[n+e+BlockOffset]};
+        end else begin
+          // First assign blocks overlapping with the following block (if any)
+          if (BlockOffset + n + e < BlockBoundaryHigh) begin
+            // Elements within the current block
+            assign max_in_prod_exps_tree_stages[0][n/MaxInWidth][e] = {in_prod_exp_carry[n+e+BlockOffset],in_prod_exp_no_carry[n+e+BlockOffset]};
+          end else if (BlockOffset + n + e < BlockBoundaryHighAligned) begin
+            // Only assign elements from the adjacent if the format is wide enough, otherwise tie to zero
+            assign max_in_prod_exps_tree_stages[0][n/MaxInWidth][e] = e < LeadingBitPositions[cfg_exp_fifo_q.num_joins] ? {in_prod_exp_carry[n+e+BlockOffset],in_prod_exp_no_carry[n+e+BlockOffset]} : '0;
+          end else if (e < MaxInWidth - LeftoverInitial) begin
+            // Assign blocks overlapping with the previous block (if any)
+            // FIXME: this may not work with some very exotic NrJoinsPerStage/BlockSize combinations
+            assign max_in_prod_exps_tree_stages[0][n/MaxInWidth][e] = e > MaxInWidth - LeadingBitPositions[cfg_exp_fifo_q.num_joins];
+          end else begin
+            // The remaining elements at the beginning of the block, always nonzero
+            assign max_in_prod_exps_tree_stages[0][n/MaxInWidth][e] = {in_prod_exp_carry[BlockBoundaryLowAligned + e],in_prod_exp_no_carry[BlockBoundaryLowAligned + e]};
+          end
+        end
+      end
+    end
+
+    // The max tree is generated with respect to the largest supported input format (i.e., each node compares MaxInWidth elements regardless of the format)
     // If the input format is not the largest one, we manipulate the comparators' carry in to adjust the format width
     for (genvar s = 0; s < $clog2(BlockSizeMax); s++) begin : gen_max_tree
-      for (genvar n = 0; n < BlockSize>>(NrMaxJoins+s); n+=2) begin : gen_nodes
-        logic [MaxInWidth-1:0][1:0] comp_carry_out;
+      for (genvar n = 0; n < BlockSize/(MaxInWidth*2**s); n+=2) begin : gen_nodes
 
-        for (genvar c = 0; c < MaxInWidth; c++) begin : gen_comparators
-          logic [1:0] comp_carry_in;
+        // Generate a comparison unless there is a leftover node. In this case generate a bye (i.e., skip the comparison)
+        if (BlockSize/(MaxInWidth*2**s) - n != 1) begin : gen_comparison
+          logic [MaxInWidth-1:0][1:0] comp_carry_out;
 
-          // Do not consider the carry in if this is the last comparator
-          // Without this, synthesizing this line results in an out-of-bounds index error (even though this can't actually happen!)
-          if (c != MaxInWidth-1) begin
-            always_comb begin : assign_comp_carry_in
-              comp_carry_in[0] = comp_carry_out[c+1][0];
-              comp_carry_in[1] = comp_carry_out[c+1][1];
+          for (genvar c = 0; c < MaxInWidth; c++) begin : gen_comparators
+            logic [1:0] comp_carry_in;
 
-              for (int unsigned i = 0; i < MaxInWidth; i++) begin
-                if (c == MaxTreeLastComp[cfg_exp_fifo_q.num_joins][i]) begin
-                  comp_carry_in[0] = 1'b0;
-                  comp_carry_in[1] = 1'b0;
+            // Do not consider the carry in if this is the last comparator
+            // Without this, synthesizing this line results in an out-of-bounds index error (even though this can't actually happen!)
+            if (c != MaxInWidth-1) begin
+              always_comb begin : assign_comp_carry_in
+                comp_carry_in[0] = comp_carry_out[c+1][0];
+                comp_carry_in[1] = comp_carry_out[c+1][1];
+
+                for (int unsigned i = 0; i < MaxInWidth; i++) begin
+                  if (c == MaxTreeLastComp[cfg_exp_fifo_q.num_joins][i]) begin
+                    comp_carry_in[0] = 1'b0;
+                    comp_carry_in[1] = 1'b0;
+                  end
                 end
               end
+            end else begin
+              assign comp_carry_in[0] = 1'b0;
+              assign comp_carry_in[1] = 1'b0;
             end
-          end else begin
-            assign comp_carry_in[0] = 1'b0;
-            assign comp_carry_in[1] = 1'b0;
+
+            assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} >= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};
+            assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} <= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};
+
+            assign max_in_prod_exps_tree_stages[s+1][n>>1][c] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} >= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]} ? max_in_prod_exps_tree_stages[s][n][c] : max_in_prod_exps_tree_stages[s][n+1][c];
           end
-
-          assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} >= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};
-          assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} <= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]};
-
-          assign max_in_prod_exps_tree_stages[s+1][n>>1][c] = {comp_carry_in[0],max_in_prod_exps_tree_stages[s][n][c]} >= {comp_carry_in[1],max_in_prod_exps_tree_stages[s][n+1][c]} ? max_in_prod_exps_tree_stages[s][n][c] : max_in_prod_exps_tree_stages[s][n+1][c];
+        end else begin : gen_bye
+          assign max_in_prod_exps_tree_stages[s+1][n>>1] = max_in_prod_exps_tree_stages[s][n];
         end
       end
     end
@@ -564,54 +740,74 @@ module auteur_dotp
     assign max_in_prod_exps_narrow_tree_stages[0] = max_in_prod_exps_tree_stages[$clog2(BlockSizeMax)][0];
 
     // If we are not using the widest available format, we need additional (narrower) stages to compute the actual maximum
-    for (genvar s = 0; s < NrMaxJoins; s++) begin : gen_narrow_max_tree
-      localparam int unsigned NodeWidth = 1<<(NrMaxJoins-s-1);
+    // for (genvar s = 0; s < NrJoinStages; s++) begin : gen_narrow_max_tree
+    for (genvar s = 0; s < NarrowTreeDepth; s++) begin : gen_narrow_max_tree
+      localparam int unsigned ActualStage = get_auctual_stage(s);
+      localparam int unsigned NodeWidth = get_max_width(NrJoinsPerStage, NrJoinStages-1-ActualStage);
+      localparam int unsigned StageWidth = NrJoinsPerStage[NrJoinStages-1-ActualStage];
+      localparam int unsigned ActualWidth = NodeWidth * StageWidth;
+      localparam int unsigned SubtreeStride = get_subtree_stride(s);
+      localparam int unsigned ReplicationBound = 2*NodeWidth*SubtreeStride < ActualWidth ? 2*NodeWidth*SubtreeStride : ActualWidth;
 
-      for (genvar n = 0; n < MaxInWidth; n+=2*NodeWidth) begin : gen_nodes
-        logic [NodeWidth-1:0][1:0] comp_carry_out;
+      for (genvar n = 0; n < ActualWidth; n+=2*NodeWidth*SubtreeStride) begin : gen_nodes
+        if (ActualWidth - n != NodeWidth) begin : gen_comparison
+          logic [NodeWidth-1:0][1:0] comp_carry_out;
 
-        for (genvar c = 0; c < NodeWidth; c++) begin : gen_comparators
-          logic [1:0] comp_carry_in;
+          for (genvar c = 0; c < NodeWidth; c++) begin : gen_comparators
+            logic [1:0] comp_carry_in;
 
-          if (c != NodeWidth-1) begin
-            always_comb begin : assign_comp_carry_in
-              comp_carry_in[0] = comp_carry_out[c+1][0];
-              comp_carry_in[1] = comp_carry_out[c+1][1];
+            if (c != NodeWidth-1) begin
+              always_comb begin : assign_comp_carry_in
+                comp_carry_in[0] = comp_carry_out[c+1][0];
+                comp_carry_in[1] = comp_carry_out[c+1][1];
 
-              for (int unsigned i = 0; i < MaxInWidth; i++) begin
-                if (c == MaxTreeLastComp[cfg_exp_fifo_q.num_joins][i]) begin
-                  comp_carry_in[0] = 1'b0;
-                  comp_carry_in[1] = 1'b0;
+                for (int unsigned i = 0; i < MaxInWidth; i++) begin
+                  if (c == MaxTreeLastComp[cfg_exp_fifo_q.num_joins][i]) begin
+                    comp_carry_in[0] = 1'b0;
+                    comp_carry_in[1] = 1'b0;
+                  end
                 end
               end
+            end else begin
+              assign comp_carry_in[0] = /*s*/ActualStage >= (NrJoinStages-cfg_exp_fifo_q.num_joins);
+              assign comp_carry_in[1] = 1'b0;
             end
-          end else begin
-            assign comp_carry_in[0] = s >= (NrMaxJoins-cfg_exp_fifo_q.num_joins);
-            assign comp_carry_in[1] = 1'b0;
+
+            assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth*SubtreeStride+c]};
+            assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} <= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth*SubtreeStride+c]};
+
+            assign max_in_prod_exps_narrow_tree_stages[s+1][n+c]           = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth*SubtreeStride+c]} ? max_in_prod_exps_narrow_tree_stages[s][n+c] : max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth*SubtreeStride+c];
+
+            for (genvar nn = NodeWidth; nn < ReplicationBound; nn += NodeWidth) begin : replicate_results
+              assign max_in_prod_exps_narrow_tree_stages[s+1][n+nn+c] = ActualStage>=(NrJoinStages-cfg_exp_fifo_q.num_joins) ? max_in_prod_exps_narrow_tree_stages[s][n+nn+c] : max_in_prod_exps_narrow_tree_stages[s+1][n+c];
+            end
+
           end
-
-          assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
-          assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} <= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]};
-
-          assign max_in_prod_exps_narrow_tree_stages[s+1][n+c]           = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c]} ? max_in_prod_exps_narrow_tree_stages[s][n+c] : max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c];
-          assign max_in_prod_exps_narrow_tree_stages[s+1][n+NodeWidth+c] = s>=(NrMaxJoins-cfg_exp_fifo_q.num_joins) ? max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth+c] : max_in_prod_exps_narrow_tree_stages[s+1][n+c];
+        end else begin : gen_bye
+          assign max_in_prod_exps_narrow_tree_stages[s+1][n]           = max_in_prod_exps_narrow_tree_stages[s][n];
         end
       end
+
+      // Here we assign the nodes that do not need a comparison, as they only replicate the values of the previous nodes
+      for (genvar nn = ActualWidth; nn < MaxInWidth; nn+=ActualWidth) begin : replicate_nodes
+        assign max_in_prod_exps_narrow_tree_stages[s+1][nn+:ActualWidth] = ActualStage>=(NrJoinStages-cfg_exp_fifo_q.num_joins) ? max_in_prod_exps_narrow_tree_stages[s][nn+:ActualWidth] : max_in_prod_exps_narrow_tree_stages[s+1][0+:ActualWidth];
+      end
+
     end
 
-    assign max_in_prod_exps[b] = max_in_prod_exps_narrow_tree_stages[NrMaxJoins];
+    assign max_in_prod_exps[b] = max_in_prod_exps_narrow_tree_stages[NarrowTreeDepth];
 
     // Now that we have the maximum exponent:
     //  - we use it to calculate the shifts for each of the elements
     //  - we calculate the actual exponent value (using OutSuperFmtExpBits) and use it to compute the shift with respect to y_i
-    for (genvar i = 0; i < BlockSizeMax; i++) begin : assign_shifts
+    for (genvar i = 0; i < ActualNrMaxElements; i++) begin : assign_shifts
       logic [MaxInWidth-1:0][InSuperFmtExpBits:0] exp_packed;
 
       for (genvar e = 0; e < MaxInWidth; e++) begin
-        assign exp_packed[e] = {in_prod_exp_carry[i*MaxInWidth+e+BlockOffset],in_prod_exp_no_carry[i*MaxInWidth+e+BlockOffset]};
+        assign exp_packed[e] = {in_prod_exp_carry[i*MaxInWidth+e+BlockBoundaryLowAligned],in_prod_exp_no_carry[i*MaxInWidth+e+BlockBoundaryLowAligned]};
       end
 
-      assign in_shifts_wrt_in_d[i+BlockOffset/MaxInWidth] = max_in_prod_exps[b] - exp_packed;
+      assign in_shifts_wrt_in_d[b][i] = max_in_prod_exps[b] - exp_packed;
     end
   end
 
@@ -638,14 +834,14 @@ module auteur_dotp
 
   dotp_cfg_t                                           cfg_exp_max_exp_d, cfg_exp_max_exp_q;
 
-  // Since the maximum exponent of each block is split into 2^NrMaxJoins segments, here we pack it into a single variable
+  // Since the maximum exponent of each block is split into MaxInWidth segments, here we pack it into a single variable
   for (genvar b = 0; b < NrBlocks; b++) begin : assign_max_in_prod_exps_norm_wide
     always_comb begin : assign_block_max_in_prod_exps_norm_wide
       max_in_prod_exps_norm_wide[b] = '0;
 
       for (int unsigned e = 0; e < MaxInWidth; e++) begin
         // Actual (nonconstant) loop bound, put inside the body of the loop to avoid synthesis problems
-        if (e >= 1<<cfg_exp_fifo_q.num_joins) begin
+        if (e >= LeadingBitPositions[cfg_exp_fifo_q.num_joins]) begin
           break;
         end
 
@@ -655,7 +851,7 @@ module auteur_dotp
 
       for (int unsigned i = MaxInWidth*InSuperFmtExpBits-1; i >= InSuperFmtExpBits; i--) begin
         // Actual (nonconstant) loop bound, just like the previous one
-        if (i < (1<<cfg_exp_fifo_q.num_joins)*InSuperFmtExpBits) begin
+        if (i < LeadingBitPositions[cfg_exp_fifo_q.num_joins]*InSuperFmtExpBits) begin
           break;
         end
 
@@ -706,9 +902,9 @@ module auteur_dotp
 
   `AUTEUR_PIPE(cfg_exp_max_exp_pipe, PipeCfg.input_path.exponent_path.maximum_exponent, dotp_cfg_t, cfg_exp_max_exp_d, cfg_exp_max_exp_q, maximum_exponent_valid_d)
 
-  `AUTEUR_PIPE(in_shifts_wrt_in_pipe, PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrInMaxWidth-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0], in_shifts_wrt_in_d, in_shifts_wrt_in_q, maximum_exponent_valid_d)
-  `AUTEUR_PIPE(absolute_max_exp_pipe, PipeCfg.input_path.exponent_path.maximum_exponent, logic [OutSuperFmtExpBits-1:0]                               , absolute_max_exp_d, absolute_max_exp_q, maximum_exponent_valid_d)
-  `AUTEUR_PIPE(scale_shift_adj_pipe , PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrBlocks-1:0][OutSuperFmtExpBits-1:0]                 , scale_shift_adj_d , scale_shift_adj_q , maximum_exponent_valid_d)
+  `AUTEUR_PIPE(in_shifts_wrt_in_pipe, PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrBlocks-1:0][NrMaxElementsPerBlock-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0], in_shifts_wrt_in_d, in_shifts_wrt_in_q, maximum_exponent_valid_d)
+  `AUTEUR_PIPE(absolute_max_exp_pipe, PipeCfg.input_path.exponent_path.maximum_exponent, logic [OutSuperFmtExpBits-1:0]                                                      , absolute_max_exp_d, absolute_max_exp_q, maximum_exponent_valid_d)
+  `AUTEUR_PIPE(scale_shift_adj_pipe , PipeCfg.input_path.exponent_path.maximum_exponent, logic [NrBlocks-1:0][OutSuperFmtExpBits-1:0]                                        , scale_shift_adj_d , scale_shift_adj_q , maximum_exponent_valid_d)
   `AUTEUR_PIPE_VALID(in_scale_prod_exp_norm_valid, PipeCfg.input_path.exponent_path.maximum_exponent, maximum_exponent_valid_d, maximum_exponent_valid_q)
 
   `AUTEUR_PIPE(maximum_exponent_overflow_pipe, get_exp_overflow_delay(PipeCfg), logic, maximum_exponent_overflow_d, maximum_exponent_overflow_q, maximum_exponent_valid_d)
@@ -739,17 +935,32 @@ module auteur_dotp
   assign y_shift_d              = (y_shift_wide  >> ShiftAmountWidth) != 0 ? '1 : y_shift_wide[ShiftAmountWidth-1:0];
 
 
+  typedef int unsigned fmt_start_t [NrJoinStages:0][MaxInWidth-1:0];
+
+  function automatic fmt_start_t gen_fmt_start_table();
+    fmt_start_t res = '{default: '0};
+
+    for (int unsigned s = 0; s <= NrJoinStages; s++) begin
+      for (int unsigned e = 0; e < MaxInWidth; e++) begin
+        res[s][e] = e / get_max_width(NrJoinsPerStage, s) * LeadingBitPositions[s];
+      end
+    end
+
+    return res;
+  endfunction
+
+  localparam int unsigned FmtStartTable [NrJoinStages:0][MaxInWidth-1:0] = gen_fmt_start_table();
+
   logic [NrIn-1:0][ShiftAmountWidth-1:0] in_shifts_norm;
 
   for (genvar i = 0; i < NrIn; i++) begin : normalize_input_shifts
-    logic [$clog2(NrIn)-1:0]               fmt_start;
-    logic [NrMaxJoins:0]                   fmt_width;
+    localparam int unsigned CurrentBlock = i / BlockSize;
+    localparam int unsigned BlockBoundaryLow = BlockSize * CurrentBlock;
+    localparam int unsigned BlockBoundaryLowAligned = BlockBoundaryLow / MaxInWidth * MaxInWidth;
+    localparam int unsigned BlockSegment = (i - BlockBoundaryLowAligned) / MaxInWidth;
 
     logic [MaxInWidth*InSuperFmtExpBits:0] shift_wide;
     logic                                  overflow;
-
-    assign fmt_width = 1<<cfg_exp_max_exp_q.num_joins;
-    assign fmt_start = i[NrMaxJoins-1:0] & ~(fmt_width-1);
 
     always_comb begin : assign_wide_shifts
       shift_wide = '0;
@@ -757,11 +968,11 @@ module auteur_dotp
       // Here we get rid of all the surplus carry bits if joining inputs
       for (int unsigned e = 0; e < MaxInWidth; e++) begin
         // Another nonconstant bound
-        if (e >= fmt_width) begin
+        if (e >= LeadingBitPositions[cfg_exp_max_exp_q.num_joins]) begin
           break;
         end
 
-        shift_wide[e*InSuperFmtExpBits+:InSuperFmtExpBits+1] = in_shifts_wrt_in_q[i>>NrMaxJoins][e+fmt_start];
+        shift_wide[e*InSuperFmtExpBits+:InSuperFmtExpBits+1] = in_shifts_wrt_in_q[CurrentBlock][BlockSegment][e+FmtStartTable[cfg_exp_max_exp_q.num_joins][i%MaxInWidth]];
       end
     end
 
@@ -773,21 +984,21 @@ module auteur_dotp
   // With formats that require 1+ joins, the final shifts of the mantissa sections have to be adjusted depending on which part of the larger mantissa they represent.
   // For example, suppose that each mantissa section has length 10 and we have a format that requires one join, the shift adjustment for the section with index 1
   // (the most significant one) is 0, while section 0 has to be shifted by 10 additional bits.
-  typedef int unsigned adj_table_t [NrMaxJoins:0][MaxInWidth-1:0];
+  typedef int unsigned adj_table_t [NrJoinStages:0][MaxInWidth-1:0];
 
   function automatic adj_table_t gen_adj_table();
-    int unsigned res [NrMaxJoins:0][MaxInWidth-1:0] = '{default: '0};
+    int unsigned res [NrJoinStages:0][MaxInWidth-1:0] = '{default: '0};
 
-    for (int unsigned j = 0; j < NrMaxJoins+1; j++) begin
+    for (int unsigned s = 0; s <= NrJoinStages; s++) begin
       for (int unsigned i = 0; i < MaxInWidth; i++) begin
-        res[j][i] = (MaxInWidth-i-1) % (1<<j);
+        res[s][i] = (MaxInWidth-i-1) % get_max_width(NrJoinsPerStage, s);
       end
     end
 
     return res;
   endfunction
 
-  localparam int unsigned AdjTable [NrMaxJoins:0][MaxInWidth-1:0] = gen_adj_table();
+  localparam int unsigned AdjTable [NrJoinStages:0][MaxInWidth-1:0] = gen_adj_table();
 
   logic [NrIn-1:0][ShiftAmountWidth-1:0] in_shifts_final_d, in_shifts_final_q;
   logic                                  in_shifts_final_valid_d, in_shifts_final_valid_q;
@@ -848,7 +1059,7 @@ module auteur_dotp
     `AUTEUR_PIPE(y_flags_fifo   , get_input_mant_delay(PipeCfg)-YDelay                    , fp_flags_t                    , y_flags_i   , y_flags_q   , y_valid_i               )
   end
 
-  // FINAL ACCUMULATION
+  // Final Accumulation
 
   logic signed [MantAccWidth-1:0]               mant_acc_d, mant_acc_q;
   logic [OutSuperFmtExpBits-1:0]                exp_acc_d, exp_acc_q;

@@ -2,8 +2,6 @@
 // Solderpad Hardware License, Version 0.51, see LICENSE for details.
 // SPDX-License-Identifier: SHL-0.51
 
-`include "auteur/timing.svh"
-
 module auteur_ce
   import auteur_pkg::*;
 #(
@@ -11,7 +9,9 @@ module auteur_ce
   parameter int unsigned    ScaleFmtWidth = 1,
   parameter int unsigned    OutFmtWidth = 1,
   parameter int unsigned    NrIn = 1,
-  parameter int unsigned    NrMaxJoins = 1,
+  parameter int unsigned    NrJoinStages = 1,
+  localparam int unsigned   NrJoinsPerStageWidth = NrJoinStages != 0 ? NrJoinStages : 1,
+  parameter int unsigned    NrJoinsPerStage [NrJoinsPerStageWidth-1:0] = '{default: 2},
   parameter int unsigned    BlockSize = NrIn,
   parameter int unsigned    InSuperFmtManBits = 1,
   parameter int unsigned    InSuperFmtExpBits = 1,
@@ -31,7 +31,7 @@ module auteur_ce
   parameter int unsigned    NrOutFormats = 1,
   parameter fp_encoding_t   OutFpEncoding [NrOutFormats-1:0] = '{default: '0},
 
-  localparam int unsigned MaxInWidth     = 1<<NrMaxJoins,
+  localparam int unsigned MaxInWidth     = get_max_width(NrJoinsPerStage, NrJoinStages),
   localparam int unsigned InPackWidth    = MaxInWidth * (1 + InSuperFmtExpBits + InSuperFmtManBits + InManUnnorm),
   localparam int unsigned ScalePackWidth = (1 + ScaleSuperFmtExpBits + ScaleSuperFmtManBits),
   localparam int unsigned OutPackWidth   = (1 + OutSuperFmtExpBits + OutSuperFmtManBits),
@@ -41,18 +41,17 @@ module auteur_ce
   parameter logic [OutPackWidth-1:0][NrOutFormats-1:0][31:0]     OutFormatMapTable   = '{default: '0},
 
   localparam int unsigned NrBlocks     = NrIn/BlockSize,
-  localparam int unsigned NrInMaxWidth = NrIn>>NrMaxJoins,
+  localparam int unsigned NrInMaxWidth = NrIn / MaxInWidth,
 
   localparam type fmt_cfg_t = struct packed {
-    logic [$clog2(NrInFormats)-1:0]    in_fmt;
-    logic [$clog2(NrScaleFormats)-1:0] scale_fmt;
-    logic [$clog2(NrOutFormats)-1:0]   out_fmt;
+    logic [cf_math_pkg::idx_width(NrInFormats)-1:0]    in_fmt;
+    logic [cf_math_pkg::idx_width(NrScaleFormats)-1:0] scale_fmt;
+    logic [cf_math_pkg::idx_width(NrOutFormats)-1:0]   out_fmt;
   }
 ) (
   input  logic                                                   clk_i,
   input  logic                                                   rst_ni,
 
-  input  logic                                                   cfg_valid_i,
   input  fmt_cfg_t                                               cfg_i,
 
   input  logic                                                   in_valid_i,
@@ -88,7 +87,7 @@ module auteur_ce
   };
 
   localparam type dotp_cfg_t = struct packed {
-    logic [$clog2(NrMaxJoins):0] num_joins;
+    logic [$clog2(NrJoinStages):0] num_joins;
   };
 
   dotp_cfg_t dotp_cfg;
@@ -103,7 +102,8 @@ module auteur_ce
 
   auteur_packer #(
     .NrIn (NrIn),
-    .NrMaxJoins (NrMaxJoins),
+    .NrJoinStages (NrJoinStages),
+    .NrJoinsPerStage (NrJoinsPerStage),
     .BaseInFmtWidth (BaseInFmtWidth),
     .NrFormats (NrInFormats),
     .InFpEncoding (InFpEncoding),
@@ -120,7 +120,8 @@ module auteur_ce
 
   auteur_packer #(
     .NrIn (NrIn),
-    .NrMaxJoins (NrMaxJoins),
+    .NrJoinStages (NrJoinStages),
+    .NrJoinsPerStage (NrJoinsPerStage),
     .BaseInFmtWidth (BaseInFmtWidth),
     .NrFormats (NrInFormats),
     .InFpEncoding (InFpEncoding),
@@ -137,7 +138,7 @@ module auteur_ce
 
   auteur_packer #(
     .NrIn (NrBlocks),
-    .NrMaxJoins (0),
+    .NrJoinStages (0),
     .BaseInFmtWidth (ScaleFmtWidth),
     .NrFormats (NrScaleFormats),
     .InFpEncoding (ScaleFpEncoding),
@@ -154,7 +155,7 @@ module auteur_ce
 
   auteur_packer #(
     .NrIn (NrBlocks),
-    .NrMaxJoins (0),
+    .NrJoinStages (0),
     .BaseInFmtWidth (ScaleFmtWidth),
     .NrFormats (NrScaleFormats),
     .InFpEncoding (ScaleFpEncoding),
@@ -171,7 +172,7 @@ module auteur_ce
 
   auteur_packer #(
     .NrIn (1),
-    .NrMaxJoins (0),
+    .NrJoinStages (0),
     .BaseInFmtWidth (OutFmtWidth),
     .NrFormats (NrOutFormats),
     .InFpEncoding (OutFpEncoding),
@@ -190,7 +191,8 @@ module auteur_ce
 
   auteur_dotp #(
     .NrIn (NrIn),
-    .NrMaxJoins (NrMaxJoins),
+    .NrJoinStages (NrJoinStages),
+    .NrJoinsPerStage (NrJoinsPerStage),
     .BlockSize (BlockSize),
     .InSuperFmtManBits (InSuperFmtManBits),
     .InSuperFmtExpBits (InSuperFmtExpBits),

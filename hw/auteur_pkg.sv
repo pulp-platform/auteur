@@ -51,6 +51,15 @@ package auteur_pkg;
     logic is_nan;
   } fp_flags_t;
 
+  function automatic int unsigned get_max_width(input int unsigned joins [], input int unsigned nr_stages);
+    int unsigned width = 1;
+
+    for (int unsigned i = 0; i < nr_stages; i++)
+      width *= joins[$size(joins)-1-i];
+
+    return width;
+  endfunction
+
   function automatic int unsigned get_input_mant_delay(input dotp_pipe_cfg_t cfg);
     int unsigned delay = 0;
 
@@ -151,4 +160,5 @@ package auteur_pkg;
 
     return res;
   endfunction
+
 endpackage

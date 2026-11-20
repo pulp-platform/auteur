@@ -1207,9 +1207,9 @@ module auteur_dotp
 
   assign norm_valid_d         = acc_valid_q;
 
-  assign final_flags_d.is_zero     = mant_acc_is_zero | (final_exp_overflow && mant_acc_lz >= MantAccIntWidth);
+  assign final_flags_d.is_zero     = (mant_acc_is_zero | (final_exp_overflow && mant_acc_lz >= MantAccIntWidth)) & ~res_is_nan_q;
   assign final_flags_d.is_denormal = 1'b0; // Not used
-  assign final_flags_d.is_infinity = res_is_infinity_q | maximum_exponent_overflow_q | (final_exp_overflow && mant_acc_lz < MantAccIntWidth);
+  assign final_flags_d.is_infinity = ~final_flags_d.is_zero & ~res_is_nan_q & (res_is_infinity_q | maximum_exponent_overflow_q | (final_exp_overflow && mant_acc_lz < MantAccIntWidth));
   assign final_flags_d.is_nan      = res_is_nan_q;
 
   `AUTEUR_PIPE(final_sign_pipe , PipeCfg.normalization, logic                         , final_sign_d , final_sign_q , norm_valid_d)

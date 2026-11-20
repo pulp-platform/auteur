@@ -131,7 +131,7 @@ module auteur_packer
       assign in_is_infinity[p][i] = &(in_i[p] & ExpMask[in_fmt_i][i]) && (~|(in_i[p] & MantMask[in_fmt_i][i]) || ~InFpEncoding[in_fmt_i].has_nan) && (InFpEncoding[in_fmt_i].has_infinity);
 
       // In a format with NaNs we check if the exponent is all ones and if at least one mantissa bit is one. Additionally, in a format without infinities, the only valid NaN is the one with a mantissa of only ones
-      assign in_is_nan[p][i]      = &(in_i[p] & ExpMask[in_fmt_i][i]) && (InFpEncoding[in_fmt_i].has_infinity ? |(in_i[p] & MantMask[in_fmt_i][i]) : &(in_i[p] & MantMask[in_fmt_i][i])) && InFpEncoding[in_fmt_i].has_nan;
+      assign in_is_nan[p][i]      = &(in_i[p] & ExpMask[in_fmt_i][i]) && (InFpEncoding[in_fmt_i].has_infinity ? |(in_i[p] & MantMask[in_fmt_i][i]) : (InFpEncoding[in_fmt_i].mantissa_bits == 0 ? 1'b1 : &(in_i[p] & MantMask[in_fmt_i][i]))) && InFpEncoding[in_fmt_i].has_nan;
     end
   end
 

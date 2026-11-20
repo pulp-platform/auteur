@@ -31,7 +31,7 @@ module auteur_ce
   parameter int unsigned    NrOutFormats = 1,
   parameter fp_encoding_t   OutFpEncoding [NrOutFormats-1:0] = '{default: '0},
 
-  localparam int unsigned MaxInWidth     = get_max_width(NrJoinsPerStage, NrJoinStages),
+  localparam int unsigned MaxInWidth     = get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0], NrJoinStages),
   localparam int unsigned InPackWidth    = MaxInWidth * (1 + InSuperFmtExpBits + InSuperFmtManBits + InManUnnorm),
   localparam int unsigned ScalePackWidth = (1 + ScaleSuperFmtExpBits + ScaleSuperFmtManBits),
   localparam int unsigned OutPackWidth   = (1 + OutSuperFmtExpBits + OutSuperFmtManBits),

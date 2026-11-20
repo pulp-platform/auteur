@@ -51,11 +51,11 @@ package auteur_pkg;
     logic is_nan;
   } fp_flags_t;
 
-  function automatic int unsigned get_max_width(input int unsigned joins [], input int unsigned nr_stages);
+  function automatic int unsigned get_max_width(input int unsigned join0, input int unsigned join1, input int unsigned nr_stages);
     int unsigned width = 1;
 
     for (int unsigned i = 0; i < nr_stages; i++)
-      width *= joins[$size(joins)-1-i];
+      width *= (i == 0) ? join1 : join0;
 
     return width;
   endfunction

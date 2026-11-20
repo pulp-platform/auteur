@@ -90,7 +90,7 @@ module auteur_dotp
   localparam int unsigned MantAccIntWidth  = $clog2(NrIn+1) + 3 + 1; // Maximum possible number of carry bits + largest mantissa overflow + implicit 1
   localparam int unsigned MantAccWidth     = 1 + MantAccIntWidth + MantAccFracWidth; // We add the sign bit
   localparam int unsigned ShiftAmountWidth = $clog2(3+1+MantAccFracWidth);
-  localparam int unsigned MaxInWidth       = get_max_width(NrJoinsPerStage, NrJoinStages);
+  localparam int unsigned MaxInWidth       = get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0], NrJoinStages);
   localparam int unsigned NrInMaxWidth     = NrIn / MaxInWidth;
   localparam int unsigned MaxStageWidth    = get_max_stage_width();
 
@@ -192,7 +192,7 @@ module auteur_dotp
     logic [NrJoinStages:0][31:0] res;
 
     for (int unsigned s = 0; s <= NrJoinStages; s++)
-      res[s] = get_max_width(NrJoinsPerStage, s);
+      res[s] = get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0], s);
 
     return res;
   endfunction
@@ -240,7 +240,7 @@ module auteur_dotp
   endfunction
 
   for (genvar s = 0; s < NrJoinStages; s++) begin : gen_join_stages
-    localparam int unsigned JoinWidth  = get_max_width(NrJoinsPerStage, s);
+    localparam int unsigned JoinWidth  = get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0], s);
     localparam int unsigned StageWidth = NrJoinsPerStage[s];
 
     localparam int unsigned ProdMantShifts [MaxStageWidth*(MaxStageWidth-1)-1:0] = gen_shifts(StageWidth);
@@ -775,7 +775,7 @@ module auteur_dotp
     // for (genvar s = 0; s < NrJoinStages; s++) begin : gen_narrow_max_tree
     for (genvar s = 0; s < NarrowTreeDepth; s++) begin : gen_narrow_max_tree
       localparam int unsigned ActualStage = get_auctual_stage(s);
-      localparam int unsigned NodeWidth = get_max_width(NrJoinsPerStage, NrJoinStages-1-ActualStage);
+      localparam int unsigned NodeWidth = get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0], NrJoinStages-1-ActualStage);
       localparam int unsigned StageWidth = NrJoinsPerStage[NrJoinStages-1-ActualStage];
       localparam int unsigned ActualWidth = NodeWidth * StageWidth;
       localparam int unsigned SubtreeStride = get_subtree_stride(s);
@@ -821,7 +821,7 @@ module auteur_dotp
       end
 
       // Here we assign the nodes that do not need a comparison, as they only replicate the values of the previous nodes
-      for (genvar nn = ActualWidth; nn < MaxInWidth; nn+=ActualWidth) begin : replicate_nodes
+      for (genvar nn = ActualWidth; nn + ActualWidth <= MaxInWidth; nn+=ActualWidth) begin : replicate_nodes
         assign max_in_prod_exps_narrow_tree_stages[s+1][nn+:ActualWidth] = ActualStage>=(NrJoinStages-cfg_exp_fifo_q.num_joins) ? max_in_prod_exps_narrow_tree_stages[s][nn+:ActualWidth] : max_in_prod_exps_narrow_tree_stages[s+1][0+:ActualWidth];
       end
 
@@ -997,7 +997,7 @@ module auteur_dotp
 
     for (int unsigned s = 0; s <= NrJoinStages; s++) begin
       for (int unsigned e = 0; e < MaxInWidth; e++) begin
-        res[s][e] = e / get_max_width(NrJoinsPerStage, s) * LeadingBitPositions[s];
+        res[s][e] = e / get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0], s) * LeadingBitPositions[s];
       end
     end
 
@@ -1046,7 +1046,7 @@ module auteur_dotp
 
     for (int unsigned s = 0; s <= NrJoinStages; s++) begin
       for (int unsigned i = 0; i < MaxInWidth; i++) begin
-        res[s][i] = (MaxInWidth-i-1) % get_max_width(NrJoinsPerStage, s);
+        res[s][i] = (MaxInWidth-i-1) % get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0], s);
       end
     end
 

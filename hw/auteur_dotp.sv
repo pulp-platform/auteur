@@ -268,8 +268,8 @@ module auteur_dotp
               x_cat[e][InSuperFmtManBits*JoinWidth] = 1'b0;
               w_cat[e][InSuperFmtManBits*JoinWidth] = 1'b0;
             end else begin
-              x_cat[e][InSuperFmtManBits*JoinWidth] = ((c+StageWidth)*JoinWidth)%(LeadingBitPositions[cfg_mant_inputs_q.num_joins]) == 0 ? 1'b1 : 1'b0;
-              w_cat[e][InSuperFmtManBits*JoinWidth] = ((c+StageWidth)*JoinWidth)%(LeadingBitPositions[cfg_mant_inputs_q.num_joins]) == 0 ? 1'b1 : 1'b0;
+              x_cat[e][InSuperFmtManBits*JoinWidth] = ((c+StageWidth)*JoinWidth)%(LeadingBitPositions[cfg_mant_inputs_q.num_joins]) == 0 ? ~x_flags_q[(c+e+1)*JoinWidth-1].is_denormal : 1'b0;
+              w_cat[e][InSuperFmtManBits*JoinWidth] = ((c+StageWidth)*JoinWidth)%(LeadingBitPositions[cfg_mant_inputs_q.num_joins]) == 0 ? ~w_flags_q[(c+e+1)*JoinWidth-1].is_denormal : 1'b0;
             end
           end
         end

@@ -855,6 +855,7 @@ module auteur_dotp
     end
   end
 
+  localparam int unsigned ScaleNormWidth = OutSuperFmtExpBits + 2;
 
   logic [NrBlocks-1:0][MaxInWidth*InSuperFmtExpBits:0] max_in_prod_exps_norm_wide;
 
@@ -863,9 +864,9 @@ module auteur_dotp
 
   logic [NrBlocks-1:0][OutSuperFmtExpBits-1:0]         inputs_max_exp_norm;
   logic [NrBlocks-1:0]                                 inputs_max_exp_overflow;
-  logic [NrBlocks-1:0][OutSuperFmtExpBits:0]           scale_exp_norm;
+  logic signed [NrBlocks-1:0][ScaleNormWidth-1:0]      scale_exp_norm;
 
-  logic [NrBlocks-1:0][OutSuperFmtExpBits-1:0]         in_scale_prod_exp_norm_d;
+  logic signed [NrBlocks-1:0][ScaleNormWidth-1:0]      in_scale_prod_exp_norm_d;
   logic [NrBlocks-1:0]                                 in_scale_prod_exp_norm_overflow;
 
   logic [OutSuperFmtExpBits-1:0]                       absolute_max_exp_d, absolute_max_exp_q;
@@ -919,22 +920,32 @@ module auteur_dotp
     // Again, here we assume no valid input format can have more exponent bits than the output super format
     assign {inputs_max_exp_overflow[b],inputs_max_exp_norm[b]} = max_in_prod_exps_norm_wide_pad[b] - OutSuperFmtBias;
 
-    assign scale_exp_norm[b]                                                = scale_prod_exp_pad[b] - OutSuperFmtBias;
-    assign {in_scale_prod_exp_norm_overflow[b],in_scale_prod_exp_norm_d[b]} = inputs_max_exp_norm[b] + scale_exp_norm[b] - OutSuperFmtBias;
+    // We need to make this signed in case scale exponent products end up being smaller than the output format bias
+    assign scale_exp_norm[b]                  = signed'(scale_prod_exp_pad[b]) - OutSuperFmtBias;
+    assign in_scale_prod_exp_norm_d[b]        = signed'(inputs_max_exp_norm[b]) + scale_exp_norm[b] - OutSuperFmtBias;
+    assign in_scale_prod_exp_norm_overflow[b] = ~in_scale_prod_exp_norm_d[b][ScaleNormWidth-1] && (in_scale_prod_exp_norm_d[b] >= (1 << OutSuperFmtExpBits));
   end
 
   // We now find the absolue maximum exponent and use it to calculate the shift adjustments
+  logic signed [ScaleNormWidth-1:0] absolute_max_exp_signed;
+
   always_comb begin : assign_absolute_max_exp
-    absolute_max_exp_d = '0;
+    absolute_max_exp_signed = 0;
 
     for (int unsigned b = 0; b < NrBlocks; b++) begin
-      if (in_scale_prod_exp_norm_d[b] > absolute_max_exp_d) begin
-        absolute_max_exp_d = in_scale_prod_exp_norm_d[b];
+      if (signed'(in_scale_prod_exp_norm_d[b]) > absolute_max_exp_signed) begin
+        absolute_max_exp_signed = in_scale_prod_exp_norm_d[b];
       end
     end
+
+    absolute_max_exp_d = absolute_max_exp_signed < 0 ? '0 : absolute_max_exp_signed[OutSuperFmtExpBits-1:0];
   end
 
   for (genvar b = 0; b < NrBlocks; b++) begin : assign_scale_shift_adj
+    //logic signed [ScaleNormWidth-1:0] adj_signed;
+
+    //assign adj_signed = signed'(absolute_max_exp_d) - in_scale_prod_exp_norm_d[b];
+    //assign scale_shift_adj_d[b] = adj_signed < 0 ? '0 : adj_signed[OutSuperFmtExpBits-1:0];
     assign scale_shift_adj_d[b] = absolute_max_exp_d - in_scale_prod_exp_norm_d[b];
   end
 

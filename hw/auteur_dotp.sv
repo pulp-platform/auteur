@@ -772,7 +772,6 @@ module auteur_dotp
     assign max_in_prod_exps_narrow_tree_stages[0] = max_in_prod_exps_tree_stages[$clog2(BlockSizeMax)][0];
 
     // If we are not using the widest available format, we need additional (narrower) stages to compute the actual maximum
-    // for (genvar s = 0; s < NrJoinStages; s++) begin : gen_narrow_max_tree
     for (genvar s = 0; s < NarrowTreeDepth; s++) begin : gen_narrow_max_tree
       localparam int unsigned ActualStage = get_auctual_stage(s);
       localparam int unsigned NodeWidth = get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0], NrJoinStages-1-ActualStage);
@@ -942,10 +941,6 @@ module auteur_dotp
   end
 
   for (genvar b = 0; b < NrBlocks; b++) begin : assign_scale_shift_adj
-    //logic signed [ScaleNormWidth-1:0] adj_signed;
-
-    //assign adj_signed = signed'(absolute_max_exp_d) - in_scale_prod_exp_norm_d[b];
-    //assign scale_shift_adj_d[b] = adj_signed < 0 ? '0 : adj_signed[OutSuperFmtExpBits-1:0];
     assign scale_shift_adj_d[b] = absolute_max_exp_d - in_scale_prod_exp_norm_d[b];
   end
 

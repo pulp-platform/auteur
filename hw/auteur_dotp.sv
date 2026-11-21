@@ -173,7 +173,7 @@ module auteur_dotp
 
           in_prod_any_positive_infinity_d[b] |= (x_flags_q[b*BlockSize+e].is_infinity | w_flags_q[b*BlockSize+e].is_infinity) & (x_sign_q[b*BlockSize+e] == w_sign_q[b*BlockSize+e]);
           in_prod_any_negative_infinity_d[b] |= (x_flags_q[b*BlockSize+e].is_infinity | w_flags_q[b*BlockSize+e].is_infinity) & (x_sign_q[b*BlockSize+e] ^ w_sign_q[b*BlockSize+e]);
-          in_prod_any_zero_d[b]              |= (x_flags_q[b*BlockSize+e].is_zero | x_flags_q[b*BlockSize+e].is_zero);
+          in_prod_any_zero_d[b]              |= (x_flags_q[b*BlockSize+e].is_zero | w_flags_q[b*BlockSize+e].is_zero);
         end
 
         in_is_nan_d[b] |= in_prod_any_positive_infinity_d[b] && in_prod_any_negative_infinity_d[b];
@@ -597,8 +597,9 @@ module auteur_dotp
   // This parameter represents how many MaxInWidth elements fit into one block: number of elements that fit perfectly + leftover left + leftover right
   localparam int unsigned NrMaxElementsPerBlock = BlockSize / MaxInWidth + 2;
 
-  logic [NrBlocks-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0]     max_in_prod_exps;
+  logic [NrBlocks-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0]                            max_in_prod_exps;
   logic [NrBlocks-1:0][NrMaxElementsPerBlock-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] in_shifts_wrt_in_d, in_shifts_wrt_in_q;
+
 
   // This function generates the table that contains the indexes of the last comparators for each format.
   // For example, in a format with no joins every single comparator is the last one, while in a format that requires one join only odd comparators are marked as final
@@ -626,6 +627,34 @@ module auteur_dotp
     end
 
     return res * MaxInWidth;
+  endfunction
+
+  typedef int unsigned element_index_t [NrJoinStages:0];
+
+  // This function returns the element index (inside a MaxInWidth segment) at which starts the first element overlapping with the next block
+  function automatic element_index_t gen_first_element_index(input int unsigned leftover_initial);
+    int unsigned res [NrJoinStages:0] = '{default: '0};
+
+    if (leftover_initial != 0) begin
+      for (int unsigned f = 0; f <= NrJoinStages; f++) begin
+        res[f] = MaxInWidth - ((leftover_initial + LeadingBitPositions[f] - 1) / LeadingBitPositions[f] * LeadingBitPositions[f]);
+      end
+    end
+
+    return res;
+  endfunction
+
+  // This function returns the element index (inside a MaxInWidth segment) at which ends the last element overlapping with the previous block
+  function automatic element_index_t gen_last_element_index(input int unsigned leftover_final);
+    int unsigned res [NrJoinStages:0] = '{default: '0};
+
+    if (leftover_final != 0) begin
+      for (int unsigned f = 0; f <= NrJoinStages; f++) begin
+        res[f] = ((leftover_final + LeadingBitPositions[f] - 1) / LeadingBitPositions[f] * LeadingBitPositions[f]);
+      end
+    end
+
+    return res;
   endfunction
 
   function automatic int unsigned get_subtree_stride(input int unsigned depth);
@@ -661,15 +690,18 @@ module auteur_dotp
     localparam int unsigned BlockBoundaryLowAligned = BlockBoundaryLow / MaxInWidth * MaxInWidth;
     localparam int unsigned BlockBoundaryHighAligned = (BlockBoundaryHigh + MaxInWidth - 1) / MaxInWidth * MaxInWidth;
     localparam int unsigned LeftoverInitial = BlockOffset - b * BlockSize;
-    localparam int unsigned LeftoverFinal   = BlockOffset + (BlockSize + MaxInWidth - 1) / MaxInWidth * MaxInWidth - (b+1) * BlockSize;
+    localparam int unsigned LeftoverFinal   = BlockOffset + (BlockSize - LeftoverInitial + MaxInWidth - 1) / MaxInWidth * MaxInWidth - (b+1) * BlockSize;
     // This accounts for the extra comparators we may need when joining formats
     localparam int unsigned ActualBlockSize = (BlockSize / MaxInWidth + (LeftoverInitial != 0) + (LeftoverFinal != 0)) * MaxInWidth;
     localparam int unsigned ActualNrMaxElements = NrMaxElementsPerBlock - (LeftoverInitial == 0) - (LeftoverFinal == 0);
+    localparam int unsigned FirstElementIndex [NrJoinStages:0] = gen_first_element_index(LeftoverInitial);
+    localparam int unsigned LastElementIndex [NrJoinStages:0] = gen_last_element_index(LeftoverFinal);
     // We assume no supported input format can have more exponent bits than the output super format
     // max_in_prod_exps_tree_stages uses InSuperFmtExpBits+1 bits rather than InSuperFmtExpBits since the surplus bias has not been subtracted yet
     logic [$clog2(BlockSizeMax):0][BlockSizeMax-1:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_tree_stages;
     logic [NarrowTreeDepth:0][MaxInWidth-1:0][InSuperFmtExpBits:0] max_in_prod_exps_narrow_tree_stages;
 
+    // FIXME: Here we mask overlapping blocks depending on the format. Could be more convenient to simply not mask anything at all. This needs some power evaluations.
     for (genvar n = 0; n < ActualBlockSize; n += MaxInWidth) begin : gen_max_tree_initial_nodes
       for (genvar e = 0; e < MaxInWidth; e++) begin : assign_elements
         // We don't need any special mapping if we are completely within the block boundaries
@@ -681,12 +713,12 @@ module auteur_dotp
             // Elements within the current block
             assign max_in_prod_exps_tree_stages[0][n/MaxInWidth][e] = {in_prod_exp_carry[n+e+BlockOffset],in_prod_exp_no_carry[n+e+BlockOffset]};
           end else if (BlockOffset + n + e < BlockBoundaryHighAligned) begin
-            // Only assign elements from the adjacent if the format is wide enough, otherwise tie to zero
-            assign max_in_prod_exps_tree_stages[0][n/MaxInWidth][e] = e < LeadingBitPositions[cfg_exp_fifo_q.num_joins] ? {in_prod_exp_carry[n+e+BlockOffset],in_prod_exp_no_carry[n+e+BlockOffset]} : '0;
+            // Only assign elements from the adjacent block if the format is wide enough, otherwise tie to zero
+            assign max_in_prod_exps_tree_stages[0][n/MaxInWidth][e] = e < LastElementIndex[cfg_exp_fifo_q.num_joins] ? {in_prod_exp_carry[n+e+BlockOffset],in_prod_exp_no_carry[n+e+BlockOffset]} : '0;
           end else if (e < MaxInWidth - LeftoverInitial) begin
             // Assign blocks overlapping with the previous block (if any)
             // FIXME: this may not work with some very exotic NrJoinsPerStage/BlockSize combinations
-            assign max_in_prod_exps_tree_stages[0][n/MaxInWidth][e] = e > MaxInWidth - LeadingBitPositions[cfg_exp_fifo_q.num_joins];
+            assign max_in_prod_exps_tree_stages[0][n/MaxInWidth][e] = e >= FirstElementIndex[cfg_exp_fifo_q.num_joins] ? {in_prod_exp_carry[BlockBoundaryLowAligned + e],in_prod_exp_no_carry[BlockBoundaryLowAligned + e]} : '0;
           end else begin
             // The remaining elements at the beginning of the block, always nonzero
             assign max_in_prod_exps_tree_stages[0][n/MaxInWidth][e] = {in_prod_exp_carry[BlockBoundaryLowAligned + e],in_prod_exp_no_carry[BlockBoundaryLowAligned + e]};
@@ -698,10 +730,10 @@ module auteur_dotp
     // The max tree is generated with respect to the largest supported input format (i.e., each node compares MaxInWidth elements regardless of the format)
     // If the input format is not the largest one, we manipulate the comparators' carry in to adjust the format width
     for (genvar s = 0; s < $clog2(BlockSizeMax); s++) begin : gen_max_tree
-      for (genvar n = 0; n < BlockSize/(MaxInWidth*2**s); n+=2) begin : gen_nodes
+      for (genvar n = 0; n < (ActualBlockSize+MaxInWidth*2**s-1)/(MaxInWidth*2**s); n+=2) begin : gen_nodes
 
         // Generate a comparison unless there is a leftover node. In this case generate a bye (i.e., skip the comparison)
-        if (BlockSize/(MaxInWidth*2**s) - n != 1) begin : gen_comparison
+        if ((ActualBlockSize+MaxInWidth*2**s-1)/(MaxInWidth*2**s) - n != 1) begin : gen_comparison
           logic [MaxInWidth-1:0][1:0] comp_carry_out;
 
           for (genvar c = 0; c < MaxInWidth; c++) begin : gen_comparators
@@ -769,14 +801,14 @@ module auteur_dotp
                 end
               end
             end else begin
-              assign comp_carry_in[0] = /*s*/ActualStage >= (NrJoinStages-cfg_exp_fifo_q.num_joins);
+              assign comp_carry_in[0] = ActualStage >= (NrJoinStages-cfg_exp_fifo_q.num_joins);
               assign comp_carry_in[1] = 1'b0;
             end
 
             assign comp_carry_out[c][0] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth*SubtreeStride+c]};
             assign comp_carry_out[c][1] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} <= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth*SubtreeStride+c]};
 
-            assign max_in_prod_exps_narrow_tree_stages[s+1][n+c]           = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth*SubtreeStride+c]} ? max_in_prod_exps_narrow_tree_stages[s][n+c] : max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth*SubtreeStride+c];
+            assign max_in_prod_exps_narrow_tree_stages[s+1][n+c] = {comp_carry_in[0],max_in_prod_exps_narrow_tree_stages[s][n+c]} >= {comp_carry_in[1],max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth*SubtreeStride+c]} ? max_in_prod_exps_narrow_tree_stages[s][n+c] : max_in_prod_exps_narrow_tree_stages[s][n+NodeWidth*SubtreeStride+c];
 
             for (genvar nn = NodeWidth; nn < ReplicationBound; nn += NodeWidth) begin : replicate_results
               assign max_in_prod_exps_narrow_tree_stages[s+1][n+nn+c] = ActualStage>=(NrJoinStages-cfg_exp_fifo_q.num_joins) ? max_in_prod_exps_narrow_tree_stages[s][n+nn+c] : max_in_prod_exps_narrow_tree_stages[s+1][n+c];
@@ -784,7 +816,7 @@ module auteur_dotp
 
           end
         end else begin : gen_bye
-          assign max_in_prod_exps_narrow_tree_stages[s+1][n]           = max_in_prod_exps_narrow_tree_stages[s][n];
+          assign max_in_prod_exps_narrow_tree_stages[s+1][n] = max_in_prod_exps_narrow_tree_stages[s][n];
         end
       end
 
@@ -801,10 +833,22 @@ module auteur_dotp
     //  - we use it to calculate the shifts for each of the elements
     //  - we calculate the actual exponent value (using OutSuperFmtExpBits) and use it to compute the shift with respect to y_i
     for (genvar i = 0; i < ActualNrMaxElements; i++) begin : assign_shifts
+      // FIXME: it could be more convenient to simply find the maximum value across all overlapping MaxInWidth segments, regardless of the format. Need to check if the current workaround brings any appreciable power advantage.
+
       logic [MaxInWidth-1:0][InSuperFmtExpBits:0] exp_packed;
 
-      for (genvar e = 0; e < MaxInWidth; e++) begin
-        assign exp_packed[e] = {in_prod_exp_carry[i*MaxInWidth+e+BlockBoundaryLowAligned],in_prod_exp_no_carry[i*MaxInWidth+e+BlockBoundaryLowAligned]};
+      if (i == 0 && LeftoverInitial != 0) begin
+        for (genvar e = 0; e < MaxInWidth; e++) begin
+          assign exp_packed[e] = e >= FirstElementIndex[cfg_exp_fifo_q.num_joins] ? {in_prod_exp_carry[i*MaxInWidth+e+BlockBoundaryLowAligned],in_prod_exp_no_carry[i*MaxInWidth+e+BlockBoundaryLowAligned]} : '0;
+        end
+      end else if (i == ActualNrMaxElements && LeftoverFinal != 0) begin
+        for (genvar e = 0; e < MaxInWidth; e++) begin
+          assign exp_packed[e] = e < LastElementIndex[cfg_exp_fifo_q.num_joins] ? {in_prod_exp_carry[i*MaxInWidth+e+BlockBoundaryLowAligned],in_prod_exp_no_carry[i*MaxInWidth+e+BlockBoundaryLowAligned]} : '0;
+        end
+      end else begin
+        for (genvar e = 0; e < MaxInWidth; e++) begin
+          assign exp_packed[e] = {in_prod_exp_carry[i*MaxInWidth+e+BlockBoundaryLowAligned],in_prod_exp_no_carry[i*MaxInWidth+e+BlockBoundaryLowAligned]};
+        end
       end
 
       assign in_shifts_wrt_in_d[b][i] = max_in_prod_exps[b] - exp_packed;
@@ -1084,7 +1128,7 @@ module auteur_dotp
   assign acc_valid_d = scale_in_prod_valid_q;
 
   `AUTEUR_PIPE(mant_acc_pipe, PipeCfg.accumulation, logic [MantAccWidth-1:0]      , mant_acc_d, mant_acc_q, acc_valid_d)
-  `AUTEUR_PIPE(exp_acc_pipe , PipeCfg.accumulation, logic [OutSuperFmtManBits-1:0], exp_acc_d , exp_acc_q , acc_valid_d)
+  `AUTEUR_PIPE(exp_acc_pipe , PipeCfg.accumulation, logic [OutSuperFmtExpBits-1:0], exp_acc_d , exp_acc_q , acc_valid_d)
   `AUTEUR_PIPE_VALID(acc_valid_pipe, PipeCfg.accumulation, acc_valid_d, acc_valid_q)
 
 

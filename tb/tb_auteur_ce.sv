@@ -26,7 +26,7 @@ module tb_auteur_dotp;
   parameter int unsigned    NrOutFormats = auteur_dtypes::NrOutTypes;
   parameter fp_encoding_t   OutFpEncoding [NrOutFormats-1:0] = auteur_dtypes::OutTypes;
 
-  localparam int unsigned MaxInWidth     = get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0], NrJoinStages);
+  localparam int unsigned MaxInWidth     = get_max_width(NrJoinsPerStage, NrJoinStages);
   localparam int unsigned InPackWidth    = MaxInWidth * (1 + InSuperFmtExpBits + InSuperFmtManBits + InManUnnorm);
   localparam int unsigned ScalePackWidth = (1 + ScaleSuperFmtExpBits + ScaleSuperFmtManBits);
   localparam int unsigned OutPackWidth   = (1 + OutSuperFmtExpBits + OutSuperFmtManBits);

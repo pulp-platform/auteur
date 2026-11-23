@@ -3,6 +3,10 @@
 // SPDX-License-Identifier: SHL-0.51
 
 package auteur_pkg;
+  // We need these parameters since unsized array function arguments are not supported during synthesis
+  localparam int unsigned NrMaxJoinStages = 2;
+  localparam int unsigned NullJoin [NrMaxJoinStages-1:0] = '{1, 1};
+
   typedef struct {
     bit          is_signed;
     int unsigned mantissa_bits;
@@ -51,11 +55,11 @@ package auteur_pkg;
     logic is_nan;
   } fp_flags_t;
 
-  function automatic int unsigned get_max_width(input int unsigned join0, input int unsigned join1, input int unsigned nr_stages);
+  function automatic int unsigned get_max_width(input int unsigned joins [NrMaxJoinStages-1:0], input int unsigned nr_stages);
     int unsigned width = 1;
 
     for (int unsigned i = 0; i < nr_stages; i++)
-      width *= (i == 0) ? join1 : join0;
+      width *= joins[i];
 
     return width;
   endfunction

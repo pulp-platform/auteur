@@ -7,8 +7,8 @@ module auteur_packer
 #(
   parameter int unsigned  NrIn = 1,
   parameter int unsigned  NrJoinStages = 1,
-  localparam int unsigned NrJoinsPerStageWidth = NrJoinStages != 0 ? NrJoinStages : 1,
-  parameter int unsigned  NrJoinsPerStage [NrJoinsPerStageWidth-1:0] = '{default: 2},
+  localparam int unsigned NrJoinsPerStageWidth = auteur_pkg::NrMaxJoinStages,
+  parameter int unsigned  NrJoinsPerStage [NrMaxJoinStages-1:0] = NrJoinStages == 0 ? auteur_pkg::NullJoin : '{default: 2},
   parameter int unsigned  BaseInFmtWidth = 1,
   parameter int unsigned  NrFormats = 1,
   parameter fp_encoding_t InFpEncoding [NrFormats-1:0] = '{default:'0},
@@ -16,11 +16,11 @@ module auteur_packer
   parameter int unsigned  OutFmtExpBits = 1,
   parameter bit           OutManUnnorm = 0,
 
-  localparam int unsigned OutPackWidth = get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0], NrJoinStages) * (1 + OutFmtExpBits + OutFmtManBits + OutManUnnorm),
+  localparam int unsigned OutPackWidth = get_max_width(NrJoinsPerStage, NrJoinStages) * (1 + OutFmtExpBits + OutFmtManBits + OutManUnnorm),
 
   parameter logic [OutPackWidth-1:0][NrFormats-1:0][31:0] FormatMapTable = '{default:'0},
 
-  localparam int unsigned MaxInWidth = get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0], NrJoinStages),
+  localparam int unsigned MaxInWidth = get_max_width(NrJoinsPerStage, NrJoinStages),
   localparam int unsigned NrInMaxWidth = NrIn / MaxInWidth,
   localparam int unsigned SelWidth = NrFormats > 1 ? $clog2(NrFormats) : 1,
 
@@ -41,7 +41,7 @@ module auteur_packer
 
     for (int unsigned f = 0; f < NrFormats; f++) begin
       for (int unsigned i = 0; i < MaxInWidth; i++) begin
-        logic [OutPackWidth-1:0] msk = ((2**(OutFmtExpBits*get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0],InFpEncoding[f].required_joins)-1) + 2**(InFpEncoding[f].exponent_bits-1)-1) << (i/get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0],InFpEncoding[f].required_joins)*OutFmtExpBits*get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0],InFpEncoding[f].required_joins))) << (MaxInWidth*(OutFmtManBits+OutManUnnorm));
+        logic [OutPackWidth-1:0] msk = ((2**(OutFmtExpBits*get_max_width(NrJoinsPerStage,InFpEncoding[f].required_joins)-1) + 2**(InFpEncoding[f].exponent_bits-1)-1) << (i/get_max_width(NrJoinsPerStage,InFpEncoding[f].required_joins)*OutFmtExpBits*get_max_width(NrJoinsPerStage,InFpEncoding[f].required_joins))) << (MaxInWidth*(OutFmtManBits+OutManUnnorm));
 
         // We permute the mask so that it can be applied to the inputs
         logic [BaseInFmtWidth*MaxInWidth-1:0] msk_perm = '0;
@@ -64,7 +64,7 @@ module auteur_packer
 
     for (int unsigned f = 0; f < NrFormats; f++) begin
       for (int unsigned i = 0; i < MaxInWidth; i++) begin
-        logic [OutPackWidth-1:0] msk = (2**(InFpEncoding[f].mantissa_bits)-1) << (i/get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0],InFpEncoding[f].required_joins)*(OutFmtManBits+OutManUnnorm)*get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0],InFpEncoding[f].required_joins) + ((get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0],InFpEncoding[f].required_joins)*(OutFmtManBits+OutManUnnorm)-OutManUnnorm)-InFpEncoding[f].mantissa_bits));
+        logic [OutPackWidth-1:0] msk = (2**(InFpEncoding[f].mantissa_bits)-1) << (i/get_max_width(NrJoinsPerStage,InFpEncoding[f].required_joins)*(OutFmtManBits+OutManUnnorm)*get_max_width(NrJoinsPerStage,InFpEncoding[f].required_joins) + ((get_max_width(NrJoinsPerStage,InFpEncoding[f].required_joins)*(OutFmtManBits+OutManUnnorm)-OutManUnnorm)-InFpEncoding[f].mantissa_bits));
 
         // We permute the mask so that it can be applied to the inputs
         logic [BaseInFmtWidth*MaxInWidth-1:0] msk_perm = '0;
@@ -89,7 +89,7 @@ module auteur_packer
 
     for (int unsigned f = 0; f < NrFormats; f++) begin
       for (int unsigned i = 0; i < MaxInWidth; i++) begin
-        res[f][i] = OutFmtExpBits * get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0],InFpEncoding[f].required_joins) * (i/get_max_width(NrJoinsPerStage[1], NrJoinsPerStage[0],InFpEncoding[f].required_joins)) + (OutManUnnorm+OutFmtManBits) * MaxInWidth;
+        res[f][i] = OutFmtExpBits * get_max_width(NrJoinsPerStage,InFpEncoding[f].required_joins) * (i/get_max_width(NrJoinsPerStage,InFpEncoding[f].required_joins)) + (OutManUnnorm+OutFmtManBits) * MaxInWidth;
       end
     end
 

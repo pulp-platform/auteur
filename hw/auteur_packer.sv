@@ -11,7 +11,7 @@ module auteur_packer
   parameter int unsigned  NrJoinsPerStage [NrMaxJoinStages-1:0] = NrJoinStages == 0 ? auteur_pkg::NullJoin : '{default: 2},
   parameter int unsigned  BaseInFmtWidth = 1,
   parameter int unsigned  NrFormats = 1,
-  parameter fp_encoding_t InFpEncoding [NrFormats-1:0] = '{default:'0},
+  parameter fp_encoding_t InFpEncoding [NrFormats-1:0] = '{default: 0},
   parameter int unsigned  OutFmtManBits = 1,
   parameter int unsigned  OutFmtExpBits = 1,
   parameter bit           OutManUnnorm = 0,
@@ -107,6 +107,10 @@ module auteur_packer
 
     if (index >= nr_man_bits) begin
       res = (index - nr_man_bits)/OutFmtExpBits;
+    end
+
+    if (res >= MaxInWidth) begin
+      return 0;
     end
 
     return res;

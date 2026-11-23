@@ -9,7 +9,7 @@ module auteur_unpacker
   parameter int unsigned   InFmtExpBits = 1,
   parameter int unsigned   OutFmtWidth = 1,
   parameter int unsigned   NrFormats = 1,
-  parameter fp_encoding_t  OutFpEncoding [NrFormats-1:0] = '{default:'0},
+  parameter fp_encoding_t  OutFpEncoding [NrFormats-1:0] = '{default: 0},
 
   localparam int unsigned SelWidth = cf_math_pkg::idx_width(NrFormats),
 

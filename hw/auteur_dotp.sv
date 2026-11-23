@@ -227,7 +227,7 @@ module auteur_dotp
   typedef int unsigned mant_shifts_t [MaxStageWidth*(MaxStageWidth-1)-1:0];
 
   // Generate the required shifts to align expanded products
-  function automatic mant_shifts_t gen_shifts(input int stage_width);
+  function automatic mant_shifts_t gen_shifts(input int unsigned stage_width);
     mant_shifts_t res = '{default: '0};
 
     for (int unsigned i = 0; i < stage_width; i++) begin
@@ -1151,7 +1151,7 @@ module auteur_dotp
     positive_infinity_mask = '0;
     negative_infinity_mask = '0;
 
-    res_is_nan_d      |= y_flags_q.is_nan | |in_is_nan_q | |scale_is_nan_q;
+    res_is_nan_d      |= y_flags_q.is_nan | (|in_is_nan_q) | (|scale_is_nan_q);
     // We have a infinity times zero product between inputs and scales
     res_is_nan_d      |= in_prod_any_zero_q & scale_is_infinity_q;
     // We have a infinity times zero product between scales and inputs
@@ -1166,7 +1166,7 @@ module auteur_dotp
     res_is_nan_d      |= y_sign_acc_q ? y_flags_q.is_infinity && |positive_infinity_mask : y_flags_q.is_infinity && |negative_infinity_mask;
 
     if (~res_is_nan_d) begin
-      res_is_infinity_d |= y_flags_q.is_infinity | |in_is_infinity_q | |scale_is_infinity_q;
+      res_is_infinity_d |= y_flags_q.is_infinity | (|in_is_infinity_q) | (|scale_is_infinity_q);
     end
   end
 

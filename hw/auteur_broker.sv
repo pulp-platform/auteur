@@ -148,10 +148,10 @@ module auteur_broker
   end
 
   // We use these localparams to avoid synthesis errors in case of a log returning zero
-  localparam int unsigned OutputBufferBundleSelWidthSafe = NrOutputBufferBundles > 1 ? $clog2(NrOutputBufferBundles) : 1;
-  localparam int unsigned OutputBufferWriteSelWidthSafe  = NrOutputBufferWriteReqs/NrOutputBufferReqs > 1 ? $clog2(NrOutputBufferWriteReqs/NrOutputBufferReqs) : 1;
-  localparam int unsigned OutputBufferReadSelWidthSafe   = NrOutputBufferReadReqs/NrOutputBufferReqs > 1 ? $clog2(NrOutputBufferReadReqs/NrOutputBufferReqs) : 1;
-  localparam int unsigned InputBufferBundleSelWidthSafe  = NrInputBufferBundles > 1 ? $clog2(NrInputBufferBundles) : 1;
+  localparam int unsigned OutputBufferBundleSelWidthSafe = cf_math_pkg::idx_width(NrOutputBufferBundles);
+  localparam int unsigned OutputBufferWriteSelWidthSafe  = cf_math_pkg::idx_width(NrOutputBufferWriteReqs/NrOutputBufferReqs);
+  localparam int unsigned OutputBufferReadSelWidthSafe   = cf_math_pkg::idx_width(NrOutputBufferReadReqs/NrOutputBufferReqs);
+  localparam int unsigned InputBufferBundleSelWidthSafe  = cf_math_pkg::idx_width(NrInputBufferBundles);
 
   // Local requests generation
   always_comb begin : local_requests_assignment

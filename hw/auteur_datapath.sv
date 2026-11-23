@@ -79,26 +79,26 @@ module auteur_datapath
   localparam int unsigned NrOutputBufferWriteBundles = GroupSizeX * NrOutputBuffersW / NrOutputBufferWriteReqs,
   localparam int unsigned NrOutputBufferReadBundles = GroupSizeX * NrOutputBuffersW / NrOutputBufferReadReqs,
 
-  localparam int unsigned OutputBufferAddrWidth = OutputBufferDepth > 1 ? $clog2(OutputBufferDepth) : 1,
-  localparam int unsigned InputBufferWideAddrWidth = InputBufferDepth > 1 ? $clog2(InputBufferDepth) : 1,
+  localparam int unsigned OutputBufferAddrWidth = cf_math_pkg::idx_width(OutputBufferDepth),
+  localparam int unsigned InputBufferWideAddrWidth = cf_math_pkg::idx_width(InputBufferDepth),
 
-  localparam int unsigned InputBufferNarrowAddrWidth = InputBufferWideWordWidth/InputBufferNarrowWordWidth * InputBufferDepth > 1 ? $clog2(InputBufferWideWordWidth/InputBufferNarrowWordWidth * InputBufferDepth) : 1,
+  localparam int unsigned InputBufferNarrowAddrWidth = cf_math_pkg::idx_width(InputBufferWideWordWidth/InputBufferNarrowWordWidth * InputBufferDepth),
 
   localparam int unsigned InputBundleAddrWidth = $clog2(NrInputBufferBundles),
   localparam int unsigned OutputBundleWriteAddrWidth = $clog2(NrOutputBufferWriteBundles),
   localparam int unsigned OutputBundleReadAddrWidth = $clog2(NrOutputBufferReadBundles),
 
-  localparam int unsigned GroupIdWidth = NrGroupsX > 1 ? $clog2(NrGroupsX) : 1,
+  localparam int unsigned GroupIdWidth = cf_math_pkg::idx_width(NrGroupsX),
 
   // GroupIdWidth + Buffer selection bit + Longest Bundle selection & Buffer address pair
   localparam int unsigned WriteAddrWidth = GroupIdWidth + 1 + (InputBundleAddrWidth + InputBufferNarrowAddrWidth > OutputBundleWriteAddrWidth + OutputBufferAddrWidth ? InputBundleAddrWidth + InputBufferNarrowAddrWidth : OutputBundleWriteAddrWidth + OutputBufferAddrWidth),
   localparam int unsigned ReadAddrWidth = GroupIdWidth + 1 + OutputBundleReadAddrWidth + OutputBufferAddrWidth,
 
-  localparam int unsigned InFmtSelWidth = NrInFormats > 1 ? $clog2(NrInFormats) : 1,
-  localparam int unsigned ScaleFmtSelWidth = NrScaleFormats > 1 ? $clog2(NrScaleFormats) : 1,
-  localparam int unsigned OutFmtSelWidth = NrOutFormats > 1 ? $clog2(NrOutFormats) : 1,
+  localparam int unsigned InFmtSelWidth = cf_math_pkg::idx_width(NrInFormats),
+  localparam int unsigned ScaleFmtSelWidth = cf_math_pkg::idx_width(NrScaleFormats),
+  localparam int unsigned OutFmtSelWidth = cf_math_pkg::idx_width(NrOutFormats),
 
-  localparam int unsigned InIterWidth = InputBufferTotDepth > 1 ? $clog2(InputBufferTotDepth) : 1,
+  localparam int unsigned InIterWidth = cf_math_pkg::idx_width(InputBufferTotDepth),
 
   localparam type fmt_cfg_t = struct packed {
     logic [InFmtSelWidth-1:0]    in_fmt;

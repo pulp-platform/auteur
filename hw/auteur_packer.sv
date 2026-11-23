@@ -22,7 +22,7 @@ module auteur_packer
 
   localparam int unsigned MaxInWidth = get_max_width(NrJoinsPerStage, NrJoinStages),
   localparam int unsigned NrInMaxWidth = NrIn / MaxInWidth,
-  localparam int unsigned SelWidth = NrFormats > 1 ? $clog2(NrFormats) : 1,
+  localparam int unsigned SelWidth = cf_math_pkg::idx_width(NrFormats),
 
   localparam type out_fmt_t = struct packed {
     logic                                  sign;

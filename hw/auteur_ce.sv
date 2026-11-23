@@ -87,7 +87,7 @@ module auteur_ce
   };
 
   localparam type dotp_cfg_t = struct packed {
-    logic [$clog2(NrJoinStages):0] num_joins;
+    logic [cf_math_pkg::idx_width(NrJoinStages+1)-1:0] num_joins;
   };
 
   dotp_cfg_t dotp_cfg;

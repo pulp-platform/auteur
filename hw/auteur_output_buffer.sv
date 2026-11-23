@@ -10,7 +10,7 @@ module auteur_output_buffer #(
   parameter int unsigned BankAddrStart = 1,
   parameter int unsigned NrPorts = NrBanks,
 
-  localparam int unsigned AddrWidth = Depth > 1 ? $clog2(Depth) : 1,
+  localparam int unsigned AddrWidth = cf_math_pkg::idx_width(Depth),
 
   localparam type req_t = struct packed {
     logic                 valid;
@@ -29,9 +29,9 @@ module auteur_output_buffer #(
   input  req_t [NrPorts-1:0] req_i,
   output rsp_t [NrPorts-1:0] rsp_o
 );
-  localparam int unsigned BankAddrWidth = Depth/NrBanks > 1 ? $clog2(Depth/NrBanks) : 1;
-  localparam int unsigned BankSelWidth  = NrBanks > 1 ? $clog2(NrBanks) : 1;
-  localparam int unsigned WinnerWidth   = NrPorts > 1 ? $clog2(NrPorts) : 1;
+  localparam int unsigned BankAddrWidth = cf_math_pkg::idx_width(Depth/NrBanks);
+  localparam int unsigned BankSelWidth  = cf_math_pkg::idx_width(NrBanks);
+  localparam int unsigned WinnerWidth   = cf_math_pkg::idx_width(NrPorts);
 
   logic [NrPorts-1:0][BankSelWidth-1:0] bank_sel_d, bank_sel_q;
   logic [NrPorts-1:0]                   req_valid_d, req_valid_q;

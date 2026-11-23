@@ -11,7 +11,7 @@ module auteur_unpacker
   parameter int unsigned   NrFormats = 1,
   parameter fp_encoding_t  OutFpEncoding [NrFormats-1:0] = '{default:'0},
 
-  localparam int unsigned SelWidth = NrFormats > 1 ? $clog2(NrFormats) : 1,
+  localparam int unsigned SelWidth = cf_math_pkg::idx_width(NrFormats),
 
   localparam type in_fmt_t = struct packed {
     logic                    sign;

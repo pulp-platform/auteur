@@ -11,7 +11,7 @@ module auteur_input_buffer #(
 
   localparam int unsigned NumNarrowWords = WideWordWidth/NarrowWordWidth,
   localparam int unsigned NarrowAddrWidth = $clog2(NumNarrowWords * Depth),
-  localparam int unsigned WideAddrWidth = Depth > 1 ? $clog2(Depth) : 1,
+  localparam int unsigned WideAddrWidth = cf_math_pkg::idx_width(Depth),
 
   localparam type narrow_req_t = struct packed {
     logic                       valid;

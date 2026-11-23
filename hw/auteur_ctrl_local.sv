@@ -14,7 +14,7 @@ module auteur_ctrl_local #(
   parameter int unsigned InputBufferDepth = 1,
   parameter int unsigned InputBufferBanks = 1,
 
-  localparam int unsigned InIterWidth = InputBufferTotDepth > 1 ? $clog2(InputBufferTotDepth) : 1,
+  localparam int unsigned InIterWidth = cf_math_pkg::idx_width(InputBufferTotDepth),
 
   localparam type fmt_cfg_t = struct packed {
     logic [InFmtSelWidth-1:0]    in_fmt;

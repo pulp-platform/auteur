@@ -48,7 +48,7 @@ module auteur_dotp
     logic [ScaleSuperFmtManBits-1:0] mantissa;
   },
   localparam type dotp_cfg_t = struct packed {
-    logic [$clog2(NrJoinStages):0] num_joins;
+    logic [cf_math_pkg::idx_width(NrJoinStages+1)-1:0] num_joins;
   }
 ) (
   input  logic                            clk_i,
@@ -569,7 +569,7 @@ module auteur_dotp
     int unsigned res = 0;
 
     for (int unsigned s = 0; s < NrJoinsPerStageWidth; s++) begin
-      res += $clog2(NrJoinsPerStage[s]);
+      res += cf_math_pkg::idx_width(NrJoinsPerStage[s]);
     end
 
     return res;
@@ -580,7 +580,7 @@ module auteur_dotp
     int unsigned acc = 0;
 
     for (int unsigned s = 0; s < NrJoinsPerStageWidth; s++) begin
-      acc += $clog2(NrJoinsPerStage[NrJoinsPerStageWidth-s-1]);
+      acc += cf_math_pkg::idx_width(NrJoinsPerStage[NrJoinsPerStageWidth-s-1]);
 
       if (depth < acc) begin
         return res;
@@ -662,7 +662,7 @@ module auteur_dotp
     int unsigned subtree_stages;
 
     for (int unsigned s = 0; s < NrJoinsPerStageWidth; s++) begin
-      subtree_stages = $clog2(NrJoinsPerStage[NrJoinsPerStageWidth-s-1]);
+      subtree_stages = cf_math_pkg::idx_width(NrJoinsPerStage[NrJoinsPerStageWidth-s-1]);
 
       if (remaining_depth < subtree_stages) begin
         return 2**remaining_depth;

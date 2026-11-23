@@ -14,7 +14,7 @@
 module auteur_fifo #(
     parameter int unsigned DEPTH        = 8,    // depth can be arbitrary from 0 to 2**32
     parameter type dtype                = logic,
-    localparam int unsigned ADDR_DEPTH  = (DEPTH > 1) ? $clog2(DEPTH) : 1
+    localparam int unsigned ADDR_DEPTH  = cf_math_pkg::idx_width(DEPTH)
 )(
     input  logic  clk_i,            // Clock
     input  logic  rst_ni,           // Asynchronous reset active low

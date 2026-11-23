@@ -61,19 +61,19 @@ module auteur_group
 
   localparam int unsigned InputBufferWideWordWidth = NrIn * BaseInFmtWidth + NrBlocks * ScaleFmtWidth,
 
-  localparam int unsigned OutputBufferAddrWidth = OutputBufferDepth > 1 ? $clog2(OutputBufferDepth) : 1,
-  localparam int unsigned InputBufferWideAddrWidth = InputBufferDepth > 1 ? $clog2(InputBufferDepth) : 1,
+  localparam int unsigned OutputBufferAddrWidth = cf_math_pkg::idx_width(OutputBufferDepth),
+  localparam int unsigned InputBufferWideAddrWidth = cf_math_pkg::idx_width(InputBufferDepth),
 
   localparam int unsigned NrOutputBuffersW = GroupSizeW / NrCesPerOutputBuffer,
 
   localparam int unsigned OutputBufferSize = GroupSizeX * GroupSizeW * OutputBufferDepth * OutputBufferBanks / NrCesPerOutputBuffer,
   localparam int unsigned InputBufferSize  = 2 * (GroupSizeX + GroupSizeW) * InputBufferBanks * InputBufferDepth * InputBufferWideWordWidth / WriteDataWidth / NrCesPerOutputBuffer,
 
-  localparam int unsigned InFmtSelWidth = NrInFormats > 1 ? $clog2(NrInFormats) : 1,
-  localparam int unsigned ScaleFmtSelWidth = NrScaleFormats > 1 ? $clog2(NrScaleFormats) : 1,
-  localparam int unsigned OutFmtSelWidth = NrOutFormats > 1 ? $clog2(NrOutFormats) : 1,
+  localparam int unsigned InFmtSelWidth = cf_math_pkg::idx_width(NrInFormats),
+  localparam int unsigned ScaleFmtSelWidth = cf_math_pkg::idx_width(NrScaleFormats),
+  localparam int unsigned OutFmtSelWidth = cf_math_pkg::idx_width(NrOutFormats),
 
-  localparam int unsigned InIterWidth = InputBufferTotDepth > 1 ? $clog2(InputBufferTotDepth) : 1,
+  localparam int unsigned InIterWidth = cf_math_pkg::idx_width(InputBufferTotDepth),
 
   localparam type fmt_cfg_t = struct packed {
     logic [InFmtSelWidth-1:0]    in_fmt;
@@ -133,7 +133,7 @@ module auteur_group
 
   // If the width of the write channel is greater than one wide word of the input buffer we instead write multiple input buffers in parallel
   localparam int unsigned InputBufferNarrowWordWidth = WriteDataWidth > InputBufferWideWordWidth ? InputBufferWideWordWidth : WriteDataWidth;
-  localparam int unsigned InputBufferNarrowAddrWidth = InputBufferWideWordWidth/InputBufferNarrowWordWidth * InputBufferDepth > 1 ? $clog2(InputBufferWideWordWidth/InputBufferNarrowWordWidth * InputBufferDepth) : 1;
+  localparam int unsigned InputBufferNarrowAddrWidth = cf_math_pkg::idx_width(InputBufferWideWordWidth/InputBufferNarrowWordWidth * InputBufferDepth);
 
   localparam int unsigned NrOutputBufferChannels = OutputBufferSplitReadWrite ? 2 : 1;
   localparam int unsigned OutputBufferNrPorts = 2 + NrOutputBufferChannels;

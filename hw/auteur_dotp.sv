@@ -187,9 +187,10 @@ module auteur_dotp
   `AUTEUR_PIPE(in_prod_any_negative_infinity_pipe, get_input_flags_delay(PipeCfg), logic [NrBlocks-1:0], in_prod_any_negative_infinity_d, in_prod_any_negative_infinity_q, in_valid_mant_q)
   `AUTEUR_PIPE(in_prod_any_zero_pipe             , get_input_flags_delay(PipeCfg), logic [NrBlocks-1:0], in_prod_any_zero_d             , in_prod_any_zero_q             , in_valid_mant_q)
 
+  typedef int unsigned leading_bit_positions_t [NrJoinStages:0];
 
-  function automatic logic [NrJoinStages:0][31:0] gen_leading_bit_positions();
-    logic [NrJoinStages:0][31:0] res;
+  function automatic leading_bit_positions_t gen_leading_bit_positions();
+    int unsigned res [NrJoinStages:0];
 
     for (int unsigned s = 0; s <= NrJoinStages; s++)
       res[s] = get_max_width(NrJoinsPerStage, s);
@@ -197,7 +198,23 @@ module auteur_dotp
     return res;
   endfunction
 
-  localparam logic [NrJoinStages:0][31:0] LeadingBitPositions = gen_leading_bit_positions();
+  localparam int unsigned LeadingBitPositions [NrJoinStages:0] = gen_leading_bit_positions();
+
+  typedef int unsigned leading_bit_positions_table_t [NrJoinStages:0][MaxInWidth-1:0];
+
+  function automatic leading_bit_positions_table_t gen_leading_bit_positions_table();
+    int unsigned res [NrJoinStages:0][MaxInWidth-1:0];
+
+    for (int unsigned s = 0; s <= NrJoinStages; s++) begin
+      for (int unsigned i = 0; i < MaxInWidth; i++) begin
+        res[s][i] = (i / LeadingBitPositions[s] + 1) * LeadingBitPositions[s];
+      end
+    end
+
+    return res;
+  endfunction
+
+  localparam int unsigned LeadingBitPositionsTable [NrJoinStages:0][MaxInWidth-1:0] = gen_leading_bit_positions_table();
 
   logic [NrJoinStages:0][NrIn-1:0][2*InSuperFmtManBits-1:0] prod_mant_no_carry;
   logic [NrJoinStages:0][NrIn-1:0][1:0]                     prod_mant_carry;
@@ -212,8 +229,8 @@ module auteur_dotp
 
     // If the input mantissa is normalized, we statically set the leading bit
     if (InManUnnorm == 0) begin
-      assign x_lead = (i+1)%(LeadingBitPositions[cfg_mant_inputs_q.num_joins]) == 0 ? ~x_flags_q[i].is_denormal : 1'b0;
-      assign w_lead = (i+1)%(LeadingBitPositions[cfg_mant_inputs_q.num_joins]) == 0 ? ~w_flags_q[i].is_denormal : 1'b0;
+      assign x_lead = (i%MaxInWidth)+1 == LeadingBitPositionsTable[cfg_mant_inputs_q.num_joins][i%MaxInWidth] ? ~x_flags_q[i].is_denormal : 1'b0;
+      assign w_lead = (i%MaxInWidth)+1 == LeadingBitPositionsTable[cfg_mant_inputs_q.num_joins][i%MaxInWidth] ? ~w_flags_q[i].is_denormal : 1'b0;
     end else begin
       assign x_lead = x_mant_q[i][InSuperFmtManBits];
       assign w_lead = w_mant_q[i][InSuperFmtManBits];
@@ -257,22 +274,22 @@ module auteur_dotp
       logic                   exp_carry;
 
       if (InManUnnorm == 0) begin
-        always_comb begin : concat_mantissae
-          for (int unsigned e = 0; e < StageWidth; e++) begin
-            for (int unsigned i = 0; i < JoinWidth; i++) begin
-              x_cat[e][i*InSuperFmtManBits+:InSuperFmtManBits] = x_mant_q[(c+e)*JoinWidth+i];
-              w_cat[e][i*InSuperFmtManBits+:InSuperFmtManBits] = w_mant_q[(c+e)*JoinWidth+i];
+        //always_comb begin : concat_mantissae
+          for (genvar e = 0; e < StageWidth; e++) begin
+            for (genvar i = 0; i < JoinWidth; i++) begin
+              assign x_cat[e][i*InSuperFmtManBits+:InSuperFmtManBits] = x_mant_q[(c+e)*JoinWidth+i];
+              assign w_cat[e][i*InSuperFmtManBits+:InSuperFmtManBits] = w_mant_q[(c+e)*JoinWidth+i];
             end
 
             if (e != StageWidth-1) begin
-              x_cat[e][InSuperFmtManBits*JoinWidth] = 1'b0;
-              w_cat[e][InSuperFmtManBits*JoinWidth] = 1'b0;
+              assign x_cat[e][InSuperFmtManBits*JoinWidth] = 1'b0;
+              assign w_cat[e][InSuperFmtManBits*JoinWidth] = 1'b0;
             end else begin
-              x_cat[e][InSuperFmtManBits*JoinWidth] = ((c+StageWidth)*JoinWidth)%(LeadingBitPositions[cfg_mant_inputs_q.num_joins]) == 0 ? ~x_flags_q[(c+e+1)*JoinWidth-1].is_denormal : 1'b0;
-              w_cat[e][InSuperFmtManBits*JoinWidth] = ((c+StageWidth)*JoinWidth)%(LeadingBitPositions[cfg_mant_inputs_q.num_joins]) == 0 ? ~w_flags_q[(c+e+1)*JoinWidth-1].is_denormal : 1'b0;
+              assign x_cat[e][InSuperFmtManBits*JoinWidth] = (((c+StageWidth)*JoinWidth-1)%MaxInWidth)+1 == LeadingBitPositionsTable[cfg_mant_inputs_q.num_joins][((c+StageWidth)*JoinWidth-1)%MaxInWidth] ? ~x_flags_q[(c+e+1)*JoinWidth-1].is_denormal : 1'b0;
+              assign w_cat[e][InSuperFmtManBits*JoinWidth] = (((c+StageWidth)*JoinWidth-1)%MaxInWidth)+1 == LeadingBitPositionsTable[cfg_mant_inputs_q.num_joins][((c+StageWidth)*JoinWidth-1)%MaxInWidth] ? ~w_flags_q[(c+e+1)*JoinWidth-1].is_denormal : 1'b0;
             end
           end
-        end
+        //end
       end else begin
         for (genvar e = 0; e < StageWidth; e++) begin : concat_mantissae
           assign x_cat[e] = x_mant_q[(c+e+1)*JoinWidth-1:(c+e)*JoinWidth];
